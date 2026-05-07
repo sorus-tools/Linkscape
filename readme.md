@@ -1,24 +1,11 @@
-# TerraLink QGIS Plugin 1.7.0
+# TerraLink QGIS Plugin 1.8.0
 
 **Ecological corridor planning for habitat connectivity**
 
 TerraLink is a QGIS plugin for building and comparing habitat-corridor scenarios under spatial, budget, and barrier constraints. It supports raster and vector inputs, four optimization modes, optional impassable areas, and a PRE/POST landscape-metrics report for scenario comparison.
 
-![Example corridors](example-optimized-corridor-locations.png)
-Image: example corridor output connecting habitat while avoiding impassable land.
-
 ---
 
-## What Is Current In 1.7.0
-
-- Reframed dialog with clearer sections for input, goal, constraints, obstacles, advanced metrics, and output.
-- Shared corridor backend across input modes:
-  raster inputs are polygonized and then analyzed with the vector corridor engine.
-- Expanded PRE/POST landscape-metrics reporting, including structural, flow/redundancy, and composite connectivity metrics.
-- Advanced connectivity-metric controls in the dialog for PC, redundancy method, strategic mobility, and metric weights.
-- More consistent summary outputs, including in-project table layers and a vector summary CSV.
-
----
 
 ## Table of Contents
 
@@ -27,8 +14,8 @@ Image: example corridor output connecting habitat while avoiding impassable land
 3. [How The Current Architecture Works](#how-the-current-architecture-works)
 4. [Quick Start](#quick-start)
 5. [Optimization Modes](#optimization-modes)
-6. [Input Modes and Parameters](#input-modes-and-parameters)
-7. [Advanced Connectivity Metrics](#advanced-connectivity-metrics)
+6. [Interpretation Guardrails](#interpretation-guardrails)
+7. [Input Modes and Parameters](#input-modes-and-parameters)
 8. [Outputs](#outputs)
 9. [Landscape Metrics Report](#landscape-metrics-report)
 10. [Tips and Best Practices](#tips-and-best-practices)
@@ -39,7 +26,7 @@ Image: example corridor output connecting habitat while avoiding impassable land
 
 ## What TerraLink Does
 
-TerraLink identifies candidate corridors between habitat patches and selects a set of corridors that best matches a chosen connectivity objective within your constraints.
+TerraLink analyzes an input of wildlife habitat patches and identifies corridors that best match a chosen connectivity objective. It helps users identify which parts of a landscape, when restored into habitat, are likely to have the greatest effect on connectivity.
 
 In practice, you specify:
 
@@ -47,12 +34,11 @@ In practice, you specify:
 - the optimization mode
 - minimum patch size
 - corridor width
-- maximum search distance
+- search radius
 - corridor budget
 - optional impassable areas
-- optional species-oriented settings for Reachable Habitat
 
-TerraLink then runs the corridor analysis, adds output layers to QGIS, and writes comparison-oriented summaries.
+TerraLink then runs the corridor analysis, adds output layers to QGIS, and writes tables of run summaries and connectivity metrics of the new landscape.
 
 It is designed for scenario testing rather than one-shot “optimal truth.” The intended workflow is to run several plausible settings and compare the mapped outputs and PRE/POST metrics.
 
@@ -84,7 +70,7 @@ After installation, TerraLink is available from:
 
 ## How The Current Architecture Works
 
-TerraLink has two **input modes**, not two separate corridor engines.
+TerraLink has two **input modes**
 
 ### Vector input mode
 
@@ -95,17 +81,11 @@ If you start with polygon habitat patches, TerraLink analyzes those polygons dir
 If you start with a raster, TerraLink:
 
 1. reads the habitat values you selected
-2. builds habitat and optional impassable masks
-3. polygonizes those masks into temporary vector layers
-4. sends those polygon layers into the same corridor-generation backend used by vector runs
+2. builds habitat and optional raster impassable masks
+3. polygonizes the habitat mask into a temporary vector layer
+4. sends that temporary vector layer, plus any routing masks, into the same corridor-generation backend used by vector runs
 
-That means:
-
-- raster and vector runs share the same corridor-selection backend
-- optimization behavior is intended to be consistent across both modes
-- differences between raster and vector results mostly come from the input representation, patch definition, and units, not from separate optimization engines
-
-This is the main architectural point the README needed to reflect.
+Raster impassables remain as a width-aware routing mask during that delegated vector run. The practical result is that raster and vector runs share the same corridor-selection backend, while raster setup still uses raster values, pixel neighborhood, and raster unit conversion.
 
 ---
 
@@ -116,41 +96,79 @@ This is the main architectural point the README needed to reflect.
 3. Choose `Raster` or `Vector` input mode.
 4. Select the input layer.
 5. Set the optimization mode.
-6. Set minimum patch size, corridor width, budget, and maximum search distance.
+6. Set minimum patch size, corridor width, budget, and search radius.
 7. Add impassable values or layers if needed.
 8. Choose an output folder or keep temporary output enabled.
 9. Click `Run`.
-10. Review the `Log` tab, map layers, and landscape-metrics report.
+10. Review the map layers, run summary and landscape-metrics report.
 
 ---
 
 ## Optimization Modes
 
-TerraLink currently exposes four optimization modes in both raster and vector input modes.
+TerraLink currently exposes four optimization modes in both raster and vector input modes. The right mode depends on whether you want one dominant backbone, broad gains in connected habitat area, pair-value-driven component joining, or more route options and redundancy.
 
 ### Largest Single Network
 
 - Goal: prioritize one dominant connected network.
-- Best for: backbone-style consolidation.
-- Behavior: after selection, TerraLink enforces a single largest connected output if disconnected corridor fragments remain.
+- Best for: backbone-style consolidation where you want one main habitat system rather than several medium-sized subnetworks. This may be most useful for wildlife that needs large uninterrupted habitat patches, such as wildcats.
+- Behavior: TerraLink concentrates the budget spend on the network that most improves the single largest connected system, and after selection it enforces a single largest connected output if disconnected corridor fragments remain.
+- Choose this when:
+  - you want to build one flagship core network
+  - you are planning around one focal population or one priority movement system
+  - you care more about the largest connected block than about spreading gains across the landscape
+- Example: you have a fragmented reserve complex and want to use limited restoration budget to create the biggest possible continuous network around the main protected area.
 
-### Most Connected Area
+### Most Connected Networks A
 
-- Goal: maximize total habitat area contained in connected networks.
-- Best for: broad structural integration across the landscape.
-- Behavior: this is the structural “connect the most habitat” mode.
+- Goal: maximize total habitat area that ends up in connected networks.
+- Best for: broad structural connectivity gains where you want more habitat recruited into connected networks.
+- Behavior: scores solutions by connected network area first, then uses lower budget, shorter length, and fewer corridors as tie-breakers. It does not try to force everything into one dominant backbone.
+- Choose this when:
+  - you want the budget to maximize connected habitat area across the landscape
+  - creating several useful networks is acceptable
+  - you care more about total connected habitat than about forcing one flagship network
+- Example: you have many scattered patches and want TerraLink to spend a limited corridor budget on the set of links that places the most habitat into connected networks. MCN A mainly rewards corridors that bring new habitat into connected networks; it usually will not add extra alternate routes inside a network unless they are part of a chain or later budget-fill behavior.
+
+### Most Connected Networks B
+
+- Goal: prioritize high-value joins between the patches a corridor connects.
+- Best for: landscapes where the value of a corridor should depend on the current patches and networks it joins, not just whether it creates newly counted connected area.
+- Behavior: scores a candidate by the combined value of the patches and networks it joins per unit cost. Unlike MCN A, patches already inside networks are still eligible, so this mode can reward joining two existing networks if that join is valuable enough.
+- Choose this when:
+  - you want patch-to-patch joins to stay valuable during the run, even if one or both of the patches get connected by other corridors elsewhere.
+  - you want a pair-driven strategy without the explicit single-backbone bias of LSN
+- Example: you have many scattered patches, but want TerraLink to keep valuing strategic joins involving patches or networks that have already been connected elsewhere. MCN B can therefore favor corridors into already valuable networks when the join value is high relative to corridor cost.
 
 ### Landscape Fluidity
 
-- Goal: improve movement quality, shortcut efficiency, and redundancy within the network.
-- Best for: reducing detours and improving internal mobility rather than only increasing connected area.
-- Behavior: can retain more than one useful connection pattern when redundancy meaningfully improves the network.
+- Goal: reduce difficulty traversing the landscape, create alternate routes, and reduce dependence on chokepoints.
+- Best for: improving route quality, shortening movement paths, and adding redundancy rather than only increasing connected area.
+- Behavior: can retain more than one useful connection pattern when that meaningfully improves landscape fluidity. Unlike MCN and LSN, LF can keep multiple corridors for the same patch pair when those corridors represent distinct useful routes.
+- Choose this when:
+  - the landscape is already partly connected but movement is brittle or bottlenecked
+  - you care about alternate paths, loop creation, or reduced reliance on a single bridge
+  - you want to improve movement quality through the network, not just attach more area
+- Example: two large habitat blocks are already linked by one narrow route, and you want to test whether adding alternate pathways around that chokepoint would make the overall network more robust.
 
-### Reachable Habitat (Advanced)
+---
 
-- Goal: maximize gain in reachable habitat under a species movement assumption.
-- Best for: species-oriented planning where dispersal distance matters.
-- Key inputs: species dispersal distance, dispersal kernel, optional minimum patch area for the species, optional patch-quality field for vector inputs, and patch-area scaling.
+## Interpretation Guardrails
+
+TerraLink outputs are optimization results under the assumptions you supplied. They should be interpreted as decision support, not as a universal statement of how organisms will move in the landscape.
+
+- A selected corridor is the best use of the specified budget under the chosen mode, patch definition, search radius, corridor width, and barrier setup.
+- A corridor not being selected does not mean it has no ecological value. It may simply have ranked lower under the current objective or fallen outside the candidate search space.
+- Results are sensitive to scale. Search radius, raster resolution, minimum patch size, and barrier detail can all change which corridors are available or worthwhile.
+- Results are also sensitive to ecological framing. Different species, movement assumptions, and habitat definitions can legitimately produce different "best" corridors on the same map.
+- TerraLink is not a full current-flow solver like Circuitscape or Omniscape. Even Landscape Fluidity uses graph-based resistance and redundancy logic on selected corridor networks, not continuous current flow across every cell.
+- Stronger confidence comes from agreement across runs. Corridors that keep appearing across plausible parameter sets are more defensible than corridors that only appear under one narrow setup.
+
+Recommended interpretation workflow:
+
+- Run more than one plausible scenario rather than relying on a single parameter set.
+- Compare map outputs and summary metrics together. Sometimes a certain optimization mode will score best on all metrics and on other landscapes each optimization mode will score best on a different metric.
+- If the goal is species-specific planning, build separate runs or presets for each focal species instead of treating one generic run as universally applicable.
 
 ---
 
@@ -170,15 +188,16 @@ Raster mode is for land-cover or habitat rasters where one or more raster values
 - `Min patch size`
 - `Budget`
 - `Corridor width`
-- `Max search distance`
+- `Search radius`
 - `Assign corridor cells`
 - optional `Impassable values`
 - optional `Allow corridors to pass through bottlenecks`
 
 ### Raster units
 
-- `Pixels` keeps patch size, budget, corridor width, and search distance in raster-cell units.
-- `Metric` and `Imperial` are available for projected rasters that can be measured in meters/feet.
+- `Pixels` keeps patch size, budget, corridor width, and search radius in raster-cell units.
+- `Metric` uses hectares for patch size and budget, meters for corridor width, and kilometers for search radius.
+- `Imperial` uses acres for patch size and budget, feet for corridor width, and miles for search radius.
 - If the raster CRS is not suitable for measured units, use `Pixels` or reproject the raster first.
 
 ### Raster barriers
@@ -197,47 +216,17 @@ Vector mode is for polygon habitat patches where each feature represents one pat
 - `Min patch size`
 - `Budget`
 - `Corridor width`
-- `Max search distance`
+- `Search radius`
 - optional impassable polygon layers
 - optional navigator `Grid cell size` for routing around impassables
+
+Vector `Metric` units use hectares for patch size and budget, meters for corridor width, and kilometers for search radius. Vector `Imperial` units use acres, feet, and miles.
 
 ### Vector requirements
 
 - The input must be a valid polygon layer.
 - The run must contain at least two valid patches after filtering.
 - Very large patch counts may be rejected for performance reasons.
-
-### Species-oriented options
-
-When `Reachable Habitat (Advanced)` is selected, TerraLink exposes:
-
-- species dispersal distance
-- dispersal kernel
-- minimum patch area for the species
-- patch area scaling
-- patch quality field for vector layers
-
-The patch-quality field is only available for vector inputs.
-
----
-
-## Advanced Connectivity Metrics
-
-The dialog includes an `Advanced Connectivity Metrics` section. These controls feed the plugin's advanced connectivity calculations used in reports and comparison-oriented analysis.
-
-Current controls include:
-
-- dispersal alpha for Probability of Connectivity
-- PC cutoff distance
-- redundancy metric selection:
-  `Shortest-Path Efficiency (IME)` or `Effective Resistance (FRI)`
-- sample counts used for redundancy estimation
-- strategic mobility controls
-- Landscape Fluidity shortcut threshold
-- weights for:
-  `m`, `LCC`, `PC`, and `Flow`
-
-The weights are normalized internally and used for the composite connectivity score reported in the landscape-metrics output.
 
 ---
 
@@ -261,9 +250,10 @@ Vector corridor outputs include corridor-level attributes such as:
 
 - patch identifiers
 - corridor area
+- corridor length
 - connected area
 - efficiency
-- multipart/segment-style flags used by the export logic
+- flags describing cases such as multipatch or isthmus behavior
 
 ### Contiguous areas output
 
@@ -299,25 +289,19 @@ These settings are still part of the raster parameter surface, but they should n
 
 Each run writes a PRE/POST landscape-metrics report for comparison across scenarios.
 
-The report currently includes a broader connectivity suite than the old README described. Depending on the run and available methods, the report can include:
+Depending on the run and available methods, the report can include:
 
 - total connected habitat area
-- habitat-normalized mesh (`m`)
-- largest connected component (`LCC`)
+- largest connected network (`LCC`)
 - Probability of Connectivity (`PC`)
-- robustness via `delta-PC`
-- redundancy/flow using `IME` or `FRI`
 - mean effective resistance
-- landscape fluidity
-- strategic mobility
-- a composite connectivity score based on weighted `m`, `LCC`, `PC`, and flow terms
 
-For `Reachable Habitat (Advanced)` runs, the report can also include:
+### What each metric is useful for
 
-- Reachable Habitat Score
-- mean reachable area
-- median reachable area
-- largest reachable habitat cluster
+- **Total connected habitat area** is useful for checking how much habitat has been brought into multi-patch networks. Use it when the main question is whether a scenario connects more habitat overall, even if that habitat is split across several networks. Higher values usually indicate broader structural connectivity gains.
+- **Largest connected network (`LCC`)** is useful for checking whether a scenario builds one large connected habitat system. Use it when planning around one priority movement system, one focal population, or species that benefit from a large continuous network. Higher values indicate a larger dominant network.
+- **Probability of Connectivity (`PC`)** is useful for comparing functional connectivity among patches while accounting for patch area and distance-decayed movement probability. Use it when large nearby patches should count more than small or distant patches. Higher values indicate stronger expected connectivity across the landscape.
+- **Mean effective resistance** is useful for checking how difficult movement remains through the selected network. Use it when the concern is travel difficulty, detours, bottlenecks, or whether corridors create easier routes between habitat patches. Lower values are better.
 
 ### How to use these metrics
 
@@ -331,7 +315,7 @@ For `Reachable Habitat (Advanced)` runs, the report can also include:
 ## Tips and Best Practices
 
 - Start with a smaller study area or conservative budget to confirm settings before scaling up.
-- Keep maximum search distance realistic; very large values increase runtime.
+- Keep search radius realistic; very large values increase runtime. In general the radius does not have to larger than your longest potential corridor
 - For raster inputs, start with simple habitat values first.
 - For vector inputs, fix invalid geometries before running if you suspect topology issues.
 - Use temporary output while iterating quickly, then save to disk once you have a scenario worth keeping.
@@ -344,16 +328,9 @@ For `Reachable Habitat (Advanced)` runs, the report can also include:
 ### No corridors produced
 
 - Increase budget.
-- Increase maximum search distance.
+- Increase search radius.
 - Reduce corridor width.
 - Make sure at least two habitat patches remain after filtering.
-
-### Reachable Habitat selects little or nothing
-
-- Increase species dispersal distance.
-- Increase budget.
-- Reduce corridor width.
-- Check whether your minimum patch area for species is too restrictive.
 
 ### Impassables seem wrong
 
@@ -369,7 +346,7 @@ For `Reachable Habitat (Advanced)` runs, the report can also include:
 
 - Reduce study area.
 - Increase minimum patch size.
-- Use a smaller search distance.
+- Use a smaller search radius.
 - Simplify barriers or disable them temporarily for diagnosis.
 
 ### Landscape metrics fail
@@ -384,3 +361,5 @@ For `Reachable Habitat (Advanced)` runs, the report can also include:
 TerraLink was created by Ben Bishop at SORUS as a practical QGIS tool for habitat-connectivity planning.
 
 Bug reports and feature requests are welcome through the GitHub issue tracker listed in the plugin metadata or by email at `benjamin.bishop@sorusconsultingllc.com`.
+
+Special thanks to Benjamin Yannis and Christopher Pavia for feedback on early versions of TerraLink.

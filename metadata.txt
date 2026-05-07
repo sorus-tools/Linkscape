@@ -1,11 +1,11 @@
 [general]
 name=TerraLink
 qgisMinimumVersion=3.22
-version=1.7.0
+version=1.8.0
 author=Ben Bishop
 email=benjamin.bishop@sorusconsultingllc.com
 description=QGIS plugin for ecological corridor generation and habitat connectivity analysis using raster and vector workflows.
-about=TerraLink identifies and optimizes ecological corridors connecting fragmented habitats using graph-based algorithms. Supports both raster (land cover grids) and vector (polygon patches) modes with optimization strategies (Largest Single Network, Most Connected Area, Landscape Fluidity, and Reachable Habitat), optional impassable land classes, budget constraints, and flexible patch definitions for conservation planning at multiple scales.
+about=TerraLink identifies and optimizes ecological corridors connecting fragmented habitats using graph-based algorithms. Supports both raster (land cover grids) and vector (polygon patches) modes with optimization strategies (Largest Single Network, Most Connected Networks A, Most Connected Networks B, and Landscape Fluidity), optional impassable land classes, budget constraints, ecological metric controls, and flexible patch definitions for conservation planning at multiple scales.
 hasProcessingProvider=True
 tags=ecology,connectivity,corridor,habitat,conservation,raster,vector,landscape,restoration,optimization,graph,theory,biodiversity,forest,planning
 icon=icon.png
@@ -14,5 +14,5 @@ deprecated=False
 homepage=https://github.com/sorus-tools/TerraLink
 repository=https://github.com/sorus-tools/TerraLink
 tracker=https://github.com/sorus-tools/TerraLink/issues
-changelog=v1.7.0: Expanded landscape metrics reporting with PRE/POST connectivity suite (m, LCC, PC, robustness via delta-PC, redundancy via IME/FRI fallback), composite connectivity score, and advanced connectivity metric controls in the dialog. v1.5: Redundant corridor selection now respects spatial separation from existing network paths; multi-link bridge selection now allows high-value A->B->C connections even when individual links are weak; interface cleanup; vector workflow consistency improvements; raster parity updates; contiguous areas dissolve fix; and output naming updates. v1.3: Shortcut efficiency scoring for redundancy, target-importance scaling, pre/post landscape metrics, vector summary CSV/table, leftover-budget expansion + low-value inclusion, and corridors layer order fix. v1.2.0: Prior release. v1.1.0: Prior release. v1.0.0: Initial TerraLink release.
+changelog=v1.8.0: Major corridor-optimization overhaul. Reworked raster/vector workflows around a shared vector backend, expanded optimization modes with Most Connected Networks A/B and Landscape Fluidity behavior, improved Largest Single Network and connected-network selection logic, added stronger chain/intermediate-patch handling, improved impassable-area routing and clipping, refreshed PRE/POST landscape metric reporting, cleaned outputs/documentation, and packaged a repository-ready QGIS plugin ZIP. v1.7.0: Expanded landscape metrics reporting with PRE/POST connectivity suite (m, LCC, PC, robustness via delta-PC, redundancy via IME/FRI fallback) and advanced connectivity metric controls in the dialog. v1.5: Redundant corridor selection now respects spatial separation from existing network paths; multi-link bridge selection now allows high-value A->B->C connections even when individual links are weak; interface cleanup; vector workflow consistency improvements; raster parity updates; contiguous areas dissolve fix; and output naming updates. v1.3: Shortcut efficiency scoring for redundancy, target-importance scaling, pre/post landscape metrics, vector summary CSV/table, leftover-budget expansion + low-value inclusion, and corridors layer order fix. v1.2.0: Prior release. v1.1.0: Prior release. v1.0.0: Initial TerraLink release.
 license=GPL-2.0-or-later

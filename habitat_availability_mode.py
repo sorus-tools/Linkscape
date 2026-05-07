@@ -159,7 +159,6 @@ class HabitatAvailabilityEvaluator:
         habitat_availability: Optional[float] = None,
     ) -> Dict[str, float]:
         dist_arr = self.dist if dist is None else dist
-        prob_arr = self.prob if prob is None else prob
         reachable = self.reachable_area if reachable_area is None else reachable_area
         ha_val = self.habitat_availability if habitat_availability is None else float(habitat_availability)
         if reachable.size <= 0:

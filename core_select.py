@@ -13,14 +13,14 @@ T = TypeVar("T")
 
 
 @dataclass(frozen=True)
-class CircuitPick(Generic[T]):
+class BackbonePick(Generic[T]):
     candidate: T
     corr_type: str
     score: float
     overlap_ratio: float
 
 
-def select_circuit_utility(
+def select_backbone_utility(
     candidates: Iterable[T],
     *,
     budget: float,
@@ -51,7 +51,7 @@ def select_circuit_utility(
     parallel_dominance_ratio: float = 1.35,
     parallel_overlap_penalty_floor: float = 0.20,
     debug_hook: Optional[Callable[[str, Dict[str, object]], None]] = None,
-) -> Tuple[List[CircuitPick[T]], Dict[str, object]]:
+) -> Tuple[List[BackbonePick[T]], Dict[str, object]]:
     """
     Shared Most Connectivity greedy selector used by raster + vector.
 
@@ -179,7 +179,7 @@ def select_circuit_utility(
             pids=pids_dbg,
         )
 
-    picks: List[CircuitPick[T]] = []
+    picks: List[BackbonePick[T]] = []
     selected_ids: set[int] = set()
 
     if enable_bridge_pairs and remaining > 0:
@@ -274,7 +274,7 @@ def select_circuit_utility(
                 remaining -= cost
                 budget_used += cost
                 primary_links += 1
-                picks.append(CircuitPick(candidate=cand, corr_type="primary", score=float(score), overlap_ratio=0.0))
+                picks.append(BackbonePick(candidate=cand, corr_type="primary", score=float(score), overlap_ratio=0.0))
                 _emit(
                     "commit",
                     stage="bridge_pairs",
@@ -488,7 +488,7 @@ def select_circuit_utility(
         remaining -= cost
         budget_used += cost
 
-        picks.append(CircuitPick(candidate=cand, corr_type=corr_type, score=float(new_score), overlap_ratio=float(overlap_r)))
+        picks.append(BackbonePick(candidate=cand, corr_type=corr_type, score=float(new_score), overlap_ratio=float(overlap_r)))
         _emit(
             "commit",
             stage="heap",
@@ -554,3 +554,8 @@ def select_circuit_utility(
         "debug_candidate_count": int(len(cand_list)),
     }
     return picks, stats
+
+
+# Back-compat aliases for older scripts and notebooks.
+CircuitPick = BackbonePick
+select_circuit_utility = select_backbone_utility

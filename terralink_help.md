@@ -8,10 +8,9 @@
 
 - Set key criteria such as minimum patch size, optimization mode and your budget. 
 
-- Optimization modes: **Largest Single Network**, **Most Connected Area**, **Landscape Fluidity**, and **Reachable Habitat**.
-- **Most Connected Area** maximizes total habitat contained in the final connected networks, then uses remaining budget without reducing that objective.
-- **Landscape Fluidity** improves internal mobility by adding corridors that meaningfully reduce detours and increase shortcut efficiency.
-- **Reachable Habitat** maximizes gain in reachable habitat within a species dispersal distance, so results depend strongly on movement scale and any patch-quality weighting you choose.
+- Optimization modes: **Largest Single Network**, **Most Connected Networks**, and **Landscape Fluidity**.
+- **Most Connected Networks** prioritizes high-value subnetwork mergers and strategic backbone completion.
+- **Landscape Fluidity** prioritizes corridors that reduce network-wide detours, create alternate routes, and reduce dependence on chokepoints.
 
 - Enable **Impassable Land Classes** when there are areas that corridors must avoid (roads, water, cities). Set values for this in raster, or select impassable polygon layers in vector mode.
 

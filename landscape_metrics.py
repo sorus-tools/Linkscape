@@ -46,16 +46,6 @@ try:
 except ImportError:  # pragma: no cover
     nx = None  # type: ignore
 
-from .habitat_availability_mode import (
-    HABITAT_AVAILABILITY_DEFAULT_KERNEL,
-    HABITAT_AVAILABILITY_DEFAULT_SCALING,
-    HabitatAvailabilityEvaluator,
-    HabitatAvailabilityNode,
-    normalize_habitat_availability_kernel,
-    normalize_patch_area_scaling,
-    scale_patch_area,
-)
-
 class UnionFind:
     """Union-Find data structure for tracking connected components."""
 
@@ -157,14 +147,10 @@ def _perform_landscape_analysis(
     results: List[str] = []
 
     if is_metric:
-        area_unit, dist_unit = "ha", "km"
         pixel_area_ha = (res_x * res_y) / 10000.0
         dist_factor = 1000.0
-        suite_dist_unit = "m"
     else:
-        area_unit, dist_unit = "pixels", "pixels"
         pixel_area_ha, dist_factor = 1.0, 1.0
-        suite_dist_unit = "pixels"
 
     pixel_size = max(abs(float(res_x or 0.0)), abs(float(res_y or 0.0))) if is_metric else 1.0
     if pixel_size <= 0:
@@ -215,6 +201,34 @@ def _perform_landscape_analysis(
         if units in ("imperial", "feet", "ft"):
             return val * 0.3048
         return val
+
+    def _estimate_pc_alpha_from_coords(coords_yx: np.ndarray, sample_cap: int = 256) -> float:
+        if coords_yx is None or len(coords_yx) < 2:
+            return 0.0
+        n = int(len(coords_yx))
+        if n <= int(sample_cap):
+            sample_idx = np.arange(n, dtype=int)
+        else:
+            sample_idx = np.linspace(0, n - 1, num=int(sample_cap), dtype=int)
+
+        nn_distances: List[float] = []
+        for idx in sample_idx.tolist():
+            dy = coords_yx[:, 0] - float(coords_yx[int(idx), 0])
+            dx = coords_yx[:, 1] - float(coords_yx[int(idx), 1])
+            dist = np.hypot(dx, dy)
+            dist[int(idx)] = np.inf
+            finite = dist[np.isfinite(dist) & (dist > 1e-9)]
+            if finite.size <= 0:
+                continue
+            nn_distances.append(float(np.min(finite)))
+
+        if not nn_distances:
+            return 0.0
+        vals = np.asarray(nn_distances, dtype=float)
+        try:
+            return float(max(np.quantile(vals, 0.75), 1e-6))
+        except Exception:
+            return float(max(np.median(vals), 1e-6))
 
     def _normalize_weights(raw: Sequence[float]) -> List[float]:
         vals = [max(0.0, float(v)) for v in raw]
@@ -861,6 +875,7 @@ def _perform_landscape_analysis(
         lcc_pre_norm = _clamp01(lcc_override_pre)
     if lcc_override_post >= 0.0:
         lcc_post_norm = _clamp01(lcc_override_post)
+    _ = (mesh_h_pre_norm, mesh_h_post_norm, lcc_pre_norm, lcc_post_norm)
 
     n_patches = int(pre_counts.size)
     patch_ids = np.arange(1, n_patches + 1, dtype=int)
@@ -878,6 +893,20 @@ def _perform_landscape_analysis(
     max_search_raw = _param_float(("max_search_distance",), 0.0)
     if alpha <= 0.0:
         alpha = _distance_to_analysis_units(alpha_raw) if alpha_raw > 0 else 0.0
+    centroids_yx = np.zeros((n_patches, 2), dtype=float)
+    if n_patches > 0:
+        ys, xs = np.nonzero(pre_labels > 0)
+        if ys.size > 0:
+            pid_vals = pre_labels[ys, xs].astype(np.int32, copy=False)
+            counts = np.bincount(pid_vals, minlength=n_patches + 1).astype(np.float64)[1:]
+            sum_y = np.bincount(pid_vals, weights=ys.astype(np.float64), minlength=n_patches + 1)[1:]
+            sum_x = np.bincount(pid_vals, weights=xs.astype(np.float64), minlength=n_patches + 1)[1:]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                centroids_yx[:, 0] = np.where(counts > 0, sum_y / counts, 0.0) * pixel_size
+                centroids_yx[:, 1] = np.where(counts > 0, sum_x / counts, 0.0) * pixel_size
+
+    if alpha <= 0.0:
+        alpha = _estimate_pc_alpha_from_coords(centroids_yx)
     if alpha <= 0.0:
         auto = max_search_raw if max_search_raw > 0 else (1000.0 if is_metric else 100.0)
         alpha = _distance_to_analysis_units(float(auto))
@@ -893,18 +922,6 @@ def _perform_landscape_analysis(
     if cutoff <= 0.0:
         cutoff = 3.0 * alpha
     cutoff = max(cutoff, alpha)
-
-    centroids_yx = np.zeros((n_patches, 2), dtype=float)
-    if n_patches > 0:
-        ys, xs = np.nonzero(pre_labels > 0)
-        if ys.size > 0:
-            pid_vals = pre_labels[ys, xs].astype(np.int32, copy=False)
-            counts = np.bincount(pid_vals, minlength=n_patches + 1).astype(np.float64)[1:]
-            sum_y = np.bincount(pid_vals, weights=ys.astype(np.float64), minlength=n_patches + 1)[1:]
-            sum_x = np.bincount(pid_vals, weights=xs.astype(np.float64), minlength=n_patches + 1)[1:]
-            with np.errstate(divide="ignore", invalid="ignore"):
-                centroids_yx[:, 0] = np.where(counts > 0, sum_y / counts, 0.0) * pixel_size
-                centroids_yx[:, 1] = np.where(counts > 0, sum_x / counts, 0.0) * pixel_size
 
     pc_pairs = _spatial_hash_pairs_within_cutoff(
         patch_ids=patch_ids,
@@ -943,7 +960,7 @@ def _perform_landscape_analysis(
         elif len(touched) == 1:
             benefit = float(areas_by_pid.get(int(touched[0]), 0.0))
         score = benefit / max(area_cost, 1e-9)
-    corridor_records.append(
+        corridor_records.append(
             {
                 "id": int(cid),
                 "patch_ids": touched,
@@ -978,6 +995,12 @@ def _perform_landscape_analysis(
     post_shortest = _all_pairs_shortest_lengths(post_graph)
     pc_pre = _compute_pc_norm(pc_pairs, areas_by_pid, total_patch_area, alpha, graph_shortest=None)
     pc_post = _compute_pc_norm(pc_pairs, areas_by_pid, total_patch_area, alpha, graph_shortest=post_shortest)
+    pc_override_pre = _param_float(("probability_connectivity_override_pre", "pc_override_pre"), -1.0)
+    pc_override_post = _param_float(("probability_connectivity_override_post", "pc_override_post"), -1.0)
+    if pc_override_pre >= 0.0:
+        pc_pre = float(pc_override_pre)
+    if pc_override_post >= 0.0:
+        pc_post = float(pc_override_post)
     sample_points = max(2, min(200, _param_int(("sample_points", "redundancy_sample_points"), 50)))
     pair_samples = max(1, _param_int(("pair_samples", "redundancy_pair_samples"), 200))
 
@@ -1017,46 +1040,14 @@ def _perform_landscape_analysis(
     fri_available = HAS_SCIPY_SPARSE and scipy_sparse is not None and scipy_factorized is not None
     requested_flow_method = str(_param_first(("redundancy_method",), "ime")).strip().lower()
     if requested_flow_method == "fri" and fri_available:
-        flow_pre = float(fri_pre)
-        flow_post = float(fri_post)
-        flow_method_label = "FRI"
+        _flow_pre = float(fri_pre)
+        _flow_post = float(fri_post)
+        _flow_method_label = "FRI"
     else:
-        flow_pre = float(ime_pre)
-        flow_post = float(ime_post)
-        flow_method_label = "IME" if requested_flow_method != "fri" else "IME (FRI unavailable)"
-
-    mobility_detour_cap = max(1.0, _param_float(("mobility_detour_cap",), 8.0))
-    mobility_pre = _strategic_mobility_score(pre_pair_d, pair_euclid, mobility_detour_cap)
-    mobility_post = _strategic_mobility_score(post_pair_d, pair_euclid, mobility_detour_cap)
-    mobility_override_pre = _param_float(("strategic_mobility_override_pre",), -1.0)
-    mobility_override_post = _param_float(("strategic_mobility_override_post",), -1.0)
-    if mobility_override_pre >= 0.0:
-        mobility_pre = _clamp01(mobility_override_pre)
-    if mobility_override_post >= 0.0:
-        mobility_post = _clamp01(mobility_override_post)
-
-    w_m = max(0.0, _param_float(("weight_m", "w_m"), 0.20))
-    w_lcc = max(0.0, _param_float(("weight_lcc", "w_lcc"), 0.20))
-    w_pc = max(0.0, _param_float(("weight_pc", "w_pc"), 0.20))
-    w_f = max(0.0, _param_float(("weight_f", "w_f"), 0.20))
-    ws = [w_m, w_lcc, w_pc, w_f]
-    total_w = sum(ws)
-    if total_w <= 0:
-        ws = [0.25, 0.25, 0.25, 0.25]
-        total_w = 1.0
-    ws = [float(v) / float(total_w) for v in ws]
-    composite_pre = (
-        ws[0] * mesh_h_pre_norm
-        + ws[1] * lcc_pre_norm
-        + ws[2] * pc_pre
-        + ws[3] * flow_pre
-    )
-    composite_post = (
-        ws[0] * mesh_h_post_norm
-        + ws[1] * lcc_post_norm
-        + ws[2] * pc_post
-        + ws[3] * flow_post
-    )
+        _flow_pre = float(ime_pre)
+        _flow_post = float(ime_post)
+        _flow_method_label = "IME" if requested_flow_method != "fri" else "IME (FRI unavailable)"
+    _ = (_flow_pre, _flow_post, _flow_method_label)
 
     def _fmt_value(val: float, decimals: int = 6) -> str:
         v = float(val)
@@ -1150,52 +1141,18 @@ def _perform_landscape_analysis(
     connected_area_post, largest_network_post, largest_patch_pre = _component_stats_from_corridors()
     connected_area_pre = 0.0
     largest_network_pre = float(largest_patch_pre)
-
-    # Reachable Habitat Score (Kupfer 2012): reachable habitat weighted by dispersal probability on the patch graph.
-    dispersal_distance = _param_float(("species_dispersal_distance_analysis", "species_dispersal_distance"), 0.0)
-    if dispersal_distance <= 0.0:
-        dispersal_distance = _distance_to_analysis_units(_param_float(("max_search_distance",), 0.0))
-    if dispersal_distance <= 0.0:
-        dispersal_distance = max(10.0 * float(pixel_size), float(pixel_size))
-    kernel = normalize_habitat_availability_kernel(_param_first(("species_dispersal_kernel",), HABITAT_AVAILABILITY_DEFAULT_KERNEL))
-    scaling = normalize_patch_area_scaling(_param_first(("patch_area_scaling",), HABITAT_AVAILABILITY_DEFAULT_SCALING))
-    min_area_species = max(0.0, _param_float(("min_patch_area_for_species_analysis", "min_patch_area_for_species"), 0.0))
-    ha_nodes: List[HabitatAvailabilityNode] = []
-    for pid in patch_ids.tolist():
-        raw_area = float(areas_by_pid.get(int(pid), 0.0) or 0.0)
-        effective = 0.0
-        if raw_area >= min_area_species:
-            effective = scale_patch_area(raw_area, scaling=scaling)
-        ha_nodes.append(HabitatAvailabilityNode(node_id=int(pid), raw_area=raw_area, effective_area=float(effective)))
-
-    try:
-        ha_eval_pre = HabitatAvailabilityEvaluator(
-            ha_nodes,
-            dispersal_distance=float(dispersal_distance),
-            kernel=kernel,
-        )
-        ha_pre = float(ha_eval_pre.habitat_availability)
-        ha_eval_post = HabitatAvailabilityEvaluator(
-            ha_nodes,
-            dispersal_distance=float(dispersal_distance),
-            kernel=kernel,
-        )
-        for rec in corridor_records:
-            touched = rec.get("patch_ids", []) or []
-            edge_specs = HabitatAvailabilityEvaluator.normalize_candidate_edges(
-                touched,
-                length=float(rec.get("length", pixel_size) or pixel_size),
-                valid_node_ids=ha_eval_post.node_ids,
-            )
-            if not edge_specs:
-                continue
-            evaluation = ha_eval_post.evaluate_candidate(edge_specs, corridor_cost=float(rec.get("area_cost", 1.0) or 1.0))
-            if evaluation is not None:
-                ha_eval_post.apply_candidate(evaluation)
-        ha_post = float(ha_eval_post.habitat_availability)
-    except Exception:
-        ha_pre = 0.0
-        ha_post = 0.0
+    connected_area_override_pre = _param_float(("total_connected_area_override_pre",), -1.0)
+    connected_area_override_post = _param_float(("total_connected_area_override_post",), -1.0)
+    largest_network_override_pre = _param_float(("largest_network_area_override_pre",), -1.0)
+    largest_network_override_post = _param_float(("largest_network_area_override_post",), -1.0)
+    if connected_area_override_pre >= 0.0:
+        connected_area_pre = float(connected_area_override_pre)
+    if connected_area_override_post >= 0.0:
+        connected_area_post = float(connected_area_override_post)
+    if largest_network_override_pre >= 0.0:
+        largest_network_pre = float(largest_network_override_pre)
+    if largest_network_override_post >= 0.0:
+        largest_network_post = float(largest_network_override_post)
 
     _add_metric_row(
         metric_name="Total Connected Habitat Area",
@@ -1219,14 +1176,14 @@ def _perform_landscape_analysis(
         decimals=2,
     )
     _add_metric_row(
-        metric_name="Reachable Habitat Score",
-        pre_val=float(ha_pre),
-        post_val=float(ha_post),
-        description="Reachable habitat weighted by dispersal probability",
-        source="Kupfer 2012",
+        metric_name="Probability of Connectivity",
+        pre_val=float(pc_pre),
+        post_val=float(pc_post),
+        description="Functionally connected habitat area from patch area and distance-decayed connectivity",
+        source="Saura & Pascual-Hortal 2007",
         higher_is_better=True,
-        bounded_unit_interval=False,
-        decimals=4,
+        bounded_unit_interval=True,
+        decimals=6,
     )
     _add_metric_row(
         metric_name="Mean Effective Resistance",

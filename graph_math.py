@@ -8,7 +8,7 @@ robustness, and redundancy.
 import math
 import random
 import numpy as np
-from typing import Dict, List, Tuple, Any, Sequence, Optional
+from typing import Dict, List, Tuple, Sequence, Optional
 
 from . import terralink_graph as nx
 

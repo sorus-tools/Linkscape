@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Set, Tuple, Optional
 
@@ -6,14 +5,12 @@ from typing import Dict, List, Set, Tuple, Optional
 class StrategyType(str, Enum):
     # Canonical strategy keys (snake_case, matching UI labels).
     LARGEST_SINGLE_NETWORK = "largest_single_network"
-    MOST_CONNECTED_HABITAT = "most_connected_habitat"
+    MOST_CONNECTED_NETWORKS = "most_connected_networks"
+    MOST_CONNECTED_NETWORKS_2 = "most_connected_networks_2"
     LANDSCAPE_FLUIDITY = "landscape_fluidity"
-    REACHABLE_HABITAT_ADVANCED = "reachable_habitat_advanced"
 
     # Back-compat aliases for older saved projects/settings.
     LARGEST_NETWORK = "largest_single_network"
-    BIGCONNECT = "most_connected_habitat"
-    HABITAT_AVAILABILITY = "reachable_habitat_advanced"
     LANDSCAPE_FLUIDITY_A = "landscape_fluidity"
     LANDSCAPE_FLUIDITY_A1 = "landscape_fluidity"
 

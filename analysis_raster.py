@@ -1,9 +1,10 @@
 """
 TerraLink raster analysis.
 
-Raster inputs are polygonized into temporary habitat and obstacle layers and then
-processed by the vector corridor engine. The legacy native raster corridor engine
-has been removed from this module.
+Habitat inputs are polygonized into a temporary vector layer and processed by the
+vector corridor engine. Raster impassables stay on the raster grid and are passed
+through as a width-aware routing mask so obstacle runs do not pay repeated vector
+geometry costs.
 """
 
 from __future__ import annotations
@@ -40,13 +41,8 @@ except ImportError:  # pragma: no cover
     QgsUnitTypes = None  # type: ignore
     QgsVectorLayer = None  # type: ignore
 
-from .habitat_availability_mode import (
-    HABITAT_AVAILABILITY_DEFAULT_KERNEL,
-    HABITAT_AVAILABILITY_DEFAULT_SCALING,
-    normalize_habitat_availability_kernel,
-    normalize_patch_area_scaling,
-)
 from .landscape_metrics import _perform_landscape_analysis
+from .utils import emit_progress
 
 GTIFF_OPTIONS = ["COMPRESS=LZW", "TILED=YES", "BIGTIFF=IF_SAFER"]
 
@@ -75,10 +71,6 @@ class RasterRunParams:
     min_corridor_width: int
     allow_bottlenecks: bool
     corridor_cell_assignment: str = "sum_total_network_area"
-    species_dispersal_distance_analysis: float = 0.0
-    species_dispersal_kernel: str = HABITAT_AVAILABILITY_DEFAULT_KERNEL
-    min_patch_area_for_species_cells: float = 0.0
-    patch_area_scaling: str = HABITAT_AVAILABILITY_DEFAULT_SCALING
 
 
 def _safe_filename(name: str, max_len: int = 64) -> str:
@@ -92,12 +84,7 @@ def _emit_progress(
     value: float,
     message: Optional[str] = None,
 ) -> None:
-    if progress_cb is None:
-        return
-    try:
-        progress_cb(int(max(0, min(100, value))), message)
-    except Exception:
-        pass
+    emit_progress(progress_cb, value, message)
 
 
 def _normalize_corridor_cell_assignment(mode: Optional[str]) -> str:
@@ -131,7 +118,7 @@ def read_band(
         if not buf:
             raise RasterAnalysisError("Failed to read raster data chunk.")
         arr = np.frombuffer(buf, dtype=np.float32, count=cols * this_rows).reshape(this_rows, cols)
-        data[start_row : start_row + this_rows] = arr
+        data[start_row: start_row + this_rows] = arr
 
         if progress_cb is not None:
             ratio = (start_row + this_rows) / max(rows, 1)
@@ -203,14 +190,6 @@ def _to_dataclass(params: Dict) -> RasterRunParams:
         min_corridor_width=int(params.get("min_corridor_width", 1)),
         allow_bottlenecks=bool(params.get("allow_bottlenecks", True)),
         corridor_cell_assignment=_normalize_corridor_cell_assignment(params.get("corridor_cell_assignment")),
-        species_dispersal_distance_analysis=float(params.get("species_dispersal_distance_analysis", 0.0) or 0.0),
-        species_dispersal_kernel=normalize_habitat_availability_kernel(
-            params.get("species_dispersal_kernel", HABITAT_AVAILABILITY_DEFAULT_KERNEL)
-        ),
-        min_patch_area_for_species_cells=float(params.get("min_patch_area_for_species_analysis", 0.0) or 0.0),
-        patch_area_scaling=normalize_patch_area_scaling(
-            params.get("patch_area_scaling", HABITAT_AVAILABILITY_DEFAULT_SCALING)
-        ),
     )
 
 
@@ -426,13 +405,6 @@ def _build_vector_delegate_params(
     min_corridor_width_m = _float_or(float(params.min_corridor_width) * pixel_size_m, "delegate_min_corridor_width_m")
     max_search_distance_m = _float_or(float(params.max_search_distance) * pixel_size_m, "delegate_max_search_distance_m")
 
-    species_dispersion = float((raw_params or {}).get("species_dispersal_distance_analysis", 0.0) or 0.0)
-    if unit_mode == "pixels":
-        species_dispersion *= pixel_size_m
-
-    species_min_patch_ha = float((raw_params or {}).get("min_patch_area_for_species_analysis", 0.0) or 0.0)
-    species_min_patch_ha *= pixel_area_ha
-
     vector_params = dict(raw_params or {})
     vector_params.update(
         {
@@ -446,9 +418,8 @@ def _build_vector_delegate_params(
             "obstacle_enabled": bool(obstacle_layer_ids),
             "obstacle_layer_ids": obstacle_layer_ids,
             "obstacle_layer_id": obstacle_layer_ids[0] if obstacle_layer_ids else None,
-            "species_dispersal_distance_analysis": float(species_dispersion),
-            "min_patch_area_for_species_analysis": float(species_min_patch_ha),
-            "patch_quality_weight_field": "",
+            "result_input_name": str((raw_params or {}).get("result_input_name") or layer.name()),
+            "result_input_layer_id": str((raw_params or {}).get("result_input_layer_id") or layer.id() or ""),
         }
     )
     return vector_params
@@ -571,26 +542,7 @@ def _run_raster_analysis_via_vector(
     obstacle_source = ""
     obstacle_count = 0
     if params.obstacle_enabled and np.any(obstacle_mask):
-        _emit_progress(progress_cb, 28, "Polygonizing impassable areas...")
-        obstacle_simplify_tolerance = max(abs(float(gt[1])), abs(float(gt[5] or gt[1]))) * 0.5
-        obstacle_layer = _polygonize_binary_mask(
-            mask=obstacle_mask.astype(np.uint8),
-            gt=gt,
-            proj=proj,
-            work_dir=bridge_dir,
-            stem=f"{_safe_filename(layer.name())}_impassable",
-            connectivity=params.patch_connectivity,
-            display_name=f"{layer.name()} impassable",
-            simplify_tolerance=obstacle_simplify_tolerance,
-        )
-        obstacle_source = str(obstacle_layer.source())
-        try:
-            obstacle_count = int(obstacle_layer.featureCount())
-        except Exception:
-            obstacle_count = 0
-        if QgsProject is not None:
-            QgsProject.instance().addMapLayer(obstacle_layer, False)
-            obstacle_layer_ids = [str(obstacle_layer.id())]
+        _emit_progress(progress_cb, 28, "Preparing impassable routing mask...")
 
     vector_params = _build_vector_delegate_params(
         layer=layer,
@@ -599,9 +551,25 @@ def _run_raster_analysis_via_vector(
         gt=gt,
         obstacle_layer_ids=obstacle_layer_ids,
     )
+    if params.obstacle_enabled and np.any(obstacle_mask):
+        vector_params["obstacle_enabled"] = True
+        vector_params["_raster_obstacle_mask"] = obstacle_mask.astype(bool, copy=False)
+        vector_params["_raster_obstacle_gt"] = tuple(float(v) for v in gt)
+        vector_params["analysis_crs_authid"] = str(layer.crs().authid() or "")
 
     _emit_progress(progress_cb, 32, "Delegating to vector corridor engine...")
     from .analysis_vector import run_vector_analysis
+
+    delegate_progress_start = 32.0
+    delegate_progress_end = 100.0
+
+    def _delegate_progress_cb(value: int, message: Optional[str] = None) -> None:
+        try:
+            inner = max(0.0, min(100.0, float(value)))
+        except Exception:
+            inner = 0.0
+        outer = delegate_progress_start + ((delegate_progress_end - delegate_progress_start) * (inner / 100.0))
+        _emit_progress(progress_cb, outer, message)
 
     try:
         results = run_vector_analysis(
@@ -611,7 +579,7 @@ def _run_raster_analysis_via_vector(
             strategy=strategy,
             temporary=temporary,
             iface=iface,
-            progress_cb=progress_cb,
+            progress_cb=_delegate_progress_cb if progress_cb is not None else None,
         )
     finally:
         if obstacle_layer is not None and QgsProject is not None:
@@ -637,6 +605,9 @@ def _run_raster_analysis_via_vector(
             workspace=bridge_dir,
             gt=gt,
         )
+        if params.obstacle_enabled and np.any(obstacle_mask):
+            result["stats"]["raster_delegate_backend"] = "vector_polygonize_raster_impassable_mask"
+            result["stats"]["raster_obstacle_pixels"] = int(np.count_nonzero(obstacle_mask))
     return results or []
 
 
@@ -644,7 +615,7 @@ def run_raster_analysis(
     layer: "QgsRasterLayer",
     output_dir: str,
     raw_params: Dict,
-    strategy: str = "most_connected_habitat",
+    strategy: str = "most_connected_networks",
     temporary: bool = False,
     iface=None,
     progress_cb: Optional[Callable[[int, Optional[str]], None]] = None,

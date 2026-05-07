@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, FrozenSet, Iterable, Optional, Sequence, Set, Tuple
+from typing import Any, FrozenSet, Tuple
 
 
 @dataclass(frozen=True)
@@ -36,4 +36,3 @@ class Candidate:
         if len(ids) == 1:
             return (int(ids[0]), int(ids[0]))
         return (0, 0)
-

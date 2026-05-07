@@ -19,8 +19,7 @@ Usage:
 from __future__ import annotations
 
 import math
-from collections import defaultdict
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 

@@ -1,5 +1,5 @@
 import os
-from html import escape
+import time
 
 import re
 from typing import Dict, List, Optional, Tuple, Union
@@ -18,7 +18,6 @@ from qgis.PyQt.QtWidgets import (
     QSizePolicy,
     QListWidgetItem,
     QLabel,
-    QComboBox,
     QFormLayout,
     QVBoxLayout,
     QTabWidget,
@@ -28,22 +27,12 @@ from qgis.PyQt.QtWidgets import (
     QDialogButtonBox,
     QListWidget,
     QLineEdit,
-    QSpinBox,
-    QDoubleSpinBox,
     QToolButton,
     QStackedWidget,
     QMessageBox,
 )
 from qgis.core import QgsApplication, Qgis, QgsProject, QgsRasterLayer, QgsVectorLayer, QgsWkbTypes, QgsUnitTypes, QgsFeature, QgsGeometry
 from qgis.gui import QgsCollapsibleGroupBox
-
-from .habitat_availability_mode import (
-    HABITAT_AVAILABILITY_DEFAULT_KERNEL,
-    HABITAT_AVAILABILITY_DEFAULT_SCALING,
-    normalize_habitat_availability_kernel,
-    normalize_patch_area_scaling,
-)
-
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
     os.path.dirname(__file__), 'terralink_dialog_base.ui'))
@@ -52,15 +41,15 @@ FORM_CLASS, _ = uic.loadUiType(os.path.join(
 STRATEGY_CHOICES_BY_LAYER = {
     "raster": [
         ("Largest Single Network", "largest_single_network"),
-        ("Most Connected Area", "most_connected_habitat"),
+        ("Most Connected Networks A", "most_connected_networks"),
+        ("Most Connected Networks B", "most_connected_networks_2"),
         ("Landscape Fluidity", "landscape_fluidity"),
-        ("Reachable Habitat (Advanced)", "reachable_habitat_advanced"),
     ],
     "vector": [
         ("Largest Single Network", "largest_single_network"),
-        ("Most Connected Area", "most_connected_habitat"),
+        ("Most Connected Networks A", "most_connected_networks"),
+        ("Most Connected Networks B", "most_connected_networks_2"),
         ("Landscape Fluidity", "landscape_fluidity"),
-        ("Reachable Habitat (Advanced)", "reachable_habitat_advanced"),
     ],
 }
 
@@ -68,12 +57,6 @@ STRATEGY_FALLBACK_BY_LAYER = {
     # Back-compat for older saved projects/settings.
     ("raster", "largest_network"): "largest_single_network",
     ("vector", "largest_network"): "largest_single_network",
-    ("raster", "bigconnect"): "most_connected_habitat",
-    ("vector", "bigconnect"): "most_connected_habitat",
-    ("raster", "most_connected_area"): "most_connected_habitat",
-    ("vector", "most_connected_area"): "most_connected_habitat",
-    ("raster", "habitat_availability"): "reachable_habitat_advanced",
-    ("vector", "habitat_availability"): "reachable_habitat_advanced",
     ("raster", "landscape_fluidity_a1"): "landscape_fluidity",
     ("vector", "landscape_fluidity_a"): "landscape_fluidity",
     ("vector", "landscape_fluidity_a1"): "landscape_fluidity",
@@ -93,6 +76,8 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self._last_progress_message: Optional[str] = None
         self._last_logged_progress_message: Optional[str] = None
         self._last_logged_progress_value: Optional[int] = None
+        self._last_actual_progress_value: Optional[int] = None
+        self._progress_stall_ticks: int = 0
         self._display_progress_value: int = 0
         self._progress_soft_ceiling: int = 0
         self._progress_heartbeat_timer: Optional[QTimer] = None
@@ -331,54 +316,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self.strategy_help_label = QLabel("")
         self.strategy_help_label.setWordWrap(True)
         goal_layout.addWidget(self.strategy_help_label)
-        self.habitat_availability_options = QWidget()
-        self.habitat_availability_options_form = QFormLayout(self.habitat_availability_options)
-        self.habitat_availability_options_form.setContentsMargins(0, 4, 0, 0)
-        self.habitat_availability_dispersal_spin = QDoubleSpinBox()
-        self.habitat_availability_dispersal_spin.setDecimals(3)
-        self.habitat_availability_dispersal_spin.setMinimum(0.0)
-        self.habitat_availability_dispersal_spin.setMaximum(10_000_000.0)
-        self.habitat_availability_dispersal_spin.setSingleStep(100.0)
-        self.habitat_availability_kernel_combo = QComboBox()
-        self.habitat_availability_kernel_combo.addItem("Exponential", "exponential")
-        self.habitat_availability_min_patch_spin = QDoubleSpinBox()
-        self.habitat_availability_min_patch_spin.setDecimals(4)
-        self.habitat_availability_min_patch_spin.setMinimum(0.0)
-        self.habitat_availability_min_patch_spin.setMaximum(10_000_000.0)
-        self.habitat_availability_min_patch_spin.setSpecialValueText("")
-        self.habitat_availability_min_patch_spin.setSingleStep(1.0)
-        self.habitat_availability_scaling_combo = QComboBox()
-        self.habitat_availability_scaling_combo.addItem("Square root", "sqrt")
-        self.habitat_availability_scaling_combo.addItem("Log(1 + area)", "log")
-        self.habitat_availability_quality_combo = QComboBox()
-        self.habitat_availability_quality_combo.addItem("(None)", "")
-        self.habitat_availability_dispersal_label = QLabel("Species dispersal distance:")
-        self.habitat_availability_min_patch_label = QLabel("Min patch area for species:")
-        self.habitat_availability_options_form.addRow(
-            self.habitat_availability_dispersal_label,
-            self.habitat_availability_dispersal_spin,
-        )
-        self.habitat_availability_options_form.addRow(
-            "Dispersal kernel:",
-            self.habitat_availability_kernel_combo,
-        )
-        self.habitat_availability_options_form.addRow(
-            self.habitat_availability_min_patch_label,
-            self.habitat_availability_min_patch_spin,
-        )
-        self.habitat_availability_options_form.addRow(
-            "Patch area scaling:",
-            self.habitat_availability_scaling_combo,
-        )
-        self.habitat_availability_options_form.addRow(
-            "Patch quality field:",
-            self.habitat_availability_quality_combo,
-        )
-        self.habitat_availability_options.setToolTip(
-            "Reachable Habitat (Advanced) maximizes the gain in reachable habitat within a species movement scale, "
-            "weighted by dispersal probability on the patch graph."
-        )
-        goal_layout.addWidget(self.habitat_availability_options)
         self.content_layout.addWidget(self.section_goal)
 
         # --- Core Constraints ---
@@ -392,8 +329,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         raster_constraints_layout.addRow(self.label_8, self.budget_spin)
         raster_constraints_layout.addRow(self.label_10, self.min_corridor_width_spin)
         raster_constraints_layout.addRow(self.label_9, self.max_search_spin)
-        self.corridor_cell_assignment_combo = QComboBox()
-        raster_constraints_layout.addRow("Assign corridor cells:", self.corridor_cell_assignment_combo)
         constraints_layout.addWidget(self._raster_constraints_row)
 
         self._vector_constraints_row = QWidget()
@@ -450,82 +385,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
 
         self.content_layout.addWidget(self.section_obstacles)
 
-        # --- Advanced Connectivity Metrics ---
-        self.section_advanced = QgsCollapsibleGroupBox("🧪 Advanced Connectivity Metrics")
-        adv_form = QFormLayout(self.section_advanced)
-        adv_form.setContentsMargins(6, 6, 6, 6)
-
-        self.pc_alpha_spin = QDoubleSpinBox()
-        self.pc_alpha_spin.setDecimals(3)
-        self.pc_alpha_spin.setMinimum(0.0)
-        self.pc_alpha_spin.setMaximum(10_000_000.0)
-        self.pc_alpha_spin.setSingleStep(100.0)
-        adv_form.addRow("Dispersal alpha (distance):", self.pc_alpha_spin)
-
-        self.pc_cutoff_spin = QDoubleSpinBox()
-        self.pc_cutoff_spin.setDecimals(3)
-        self.pc_cutoff_spin.setMinimum(0.0)
-        self.pc_cutoff_spin.setMaximum(10_000_000.0)
-        self.pc_cutoff_spin.setSingleStep(100.0)
-        adv_form.addRow("PC cutoff distance:", self.pc_cutoff_spin)
-
-        self.redundancy_method_combo = QComboBox()
-        self.redundancy_method_combo.addItem("Shortest-Path Efficiency (IME)", "ime")
-        self.redundancy_method_combo.addItem("Effective Resistance (FRI)", "fri")
-        adv_form.addRow("Redundancy metric:", self.redundancy_method_combo)
-
-        self.redundancy_sample_points_spin = QSpinBox()
-        self.redundancy_sample_points_spin.setRange(2, 200)
-        adv_form.addRow("Sample points (K):", self.redundancy_sample_points_spin)
-
-        self.redundancy_pair_samples_spin = QSpinBox()
-        self.redundancy_pair_samples_spin.setRange(1, 5000)
-        adv_form.addRow("Pair samples (P):", self.redundancy_pair_samples_spin)
-
-        self.mobility_lambda_intra_spin = QDoubleSpinBox()
-        self.mobility_lambda_intra_spin.setDecimals(6)
-        self.mobility_lambda_intra_spin.setRange(0.0, 1.0)
-        self.mobility_lambda_intra_spin.setSingleStep(0.0005)
-        adv_form.addRow("Strategic Mobility intra penalty (lambda):", self.mobility_lambda_intra_spin)
-
-        self.mobility_tau_spin = QDoubleSpinBox()
-        self.mobility_tau_spin.setDecimals(3)
-        self.mobility_tau_spin.setRange(0.0, 2.0)
-        self.mobility_tau_spin.setSingleStep(0.05)
-        adv_form.addRow("Strategic Mobility intra gate (tau):", self.mobility_tau_spin)
-
-        self.resiliency_shortcut_threshold_spin = QDoubleSpinBox()
-        self.resiliency_shortcut_threshold_spin.setDecimals(3)
-        self.resiliency_shortcut_threshold_spin.setRange(1.0, 20.0)
-        self.resiliency_shortcut_threshold_spin.setSingleStep(0.1)
-        adv_form.addRow("Landscape Fluidity shortcut gate (T):", self.resiliency_shortcut_threshold_spin)
-
-        self.weight_m_spin = QDoubleSpinBox()
-        self.weight_m_spin.setDecimals(3)
-        self.weight_m_spin.setRange(0.0, 100.0)
-        self.weight_m_spin.setSingleStep(0.05)
-        adv_form.addRow("Weight m:", self.weight_m_spin)
-
-        self.weight_lcc_spin = QDoubleSpinBox()
-        self.weight_lcc_spin.setDecimals(3)
-        self.weight_lcc_spin.setRange(0.0, 100.0)
-        self.weight_lcc_spin.setSingleStep(0.05)
-        adv_form.addRow("Weight LCC:", self.weight_lcc_spin)
-
-        self.weight_pc_spin = QDoubleSpinBox()
-        self.weight_pc_spin.setDecimals(3)
-        self.weight_pc_spin.setRange(0.0, 100.0)
-        self.weight_pc_spin.setSingleStep(0.05)
-        adv_form.addRow("Weight PC:", self.weight_pc_spin)
-
-        self.weight_f_spin = QDoubleSpinBox()
-        self.weight_f_spin.setDecimals(3)
-        self.weight_f_spin.setRange(0.0, 100.0)
-        self.weight_f_spin.setSingleStep(0.05)
-        adv_form.addRow("Weight Flow:", self.weight_f_spin)
-
-        self.content_layout.addWidget(self.section_advanced)
-
         # --- Output ---
         self.section_output = QgsCollapsibleGroupBox("💾 Output")
         out_layout = QVBoxLayout(self.section_output)
@@ -559,8 +418,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self._set_collapsed(self.section_output, False)
         self._set_collapsed(self.section_constraints, False)
         self._set_collapsed(self.section_obstacles, True)
-        self._set_collapsed(self.section_advanced, True)
-
         self._update_strategy_help()
         try:
             self.resize(900, 700)
@@ -575,33 +432,40 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         text = ""
         if key == "largest_single_network":
             text = "Prioritize one dominant connected network under budget."
-        elif key == "most_connected_habitat":
+        elif key == "most_connected_networks":
             text = (
-                "Maximize total habitat contained in the final connected networks, then use as much remaining budget "
-                "as possible without reducing that objective."
+                "Original MCN behavior. Favors total connected subnetwork area with additional search and cleanup "
+                "logic that can still consolidate stronger subnetworks."
+            )
+        elif key == "most_connected_networks_2":
+            text = (
+                "Rank corridor candidates by the value of the subnetworks they join per unit cost, without giving "
+                "special preference to a dominant backbone."
             )
         elif key == "landscape_fluidity":
             text = "Improve landscape fluidity by adding corridors that meaningfully reduce detours and increase internal mobility."
-        elif key == "reachable_habitat_advanced":
-            text = (
-                "Maximize the gain in reachable habitat area within a species dispersal limit. "
-                "This mode favors corridors that unlock large, functionally reachable habitat on the patch graph."
-            )
         self.strategy_help_label.setText(text)
-        self._update_habitat_availability_controls_visibility()
 
     @staticmethod
     def _normalize_strategy_key(strategy: Optional[str]) -> str:
-        key = str(strategy or "most_connected_habitat").strip().lower().replace(" ", "_").replace("-", "_")
+        key = str(strategy or "most_connected_networks").strip().lower().replace(" ", "_").replace("-", "_")
         aliases = {
             # Back-compat
             "largest_network": "largest_single_network",
-            "bigconnect": "most_connected_habitat",
-            "most_connected_area": "most_connected_habitat",
-            "habitat_availability": "reachable_habitat_advanced",
-            "habitatavailability": "reachable_habitat_advanced",
-            "habitat_available": "reachable_habitat_advanced",
-            "ha": "reachable_habitat_advanced",
+            "most_connected_network": "most_connected_networks",
+            "most_connected_network_1": "most_connected_networks",
+            "most_connected_networks_1": "most_connected_networks",
+            "mcn1": "most_connected_networks",
+            "most_connected_network_a": "most_connected_networks",
+            "most_connected_networks_a": "most_connected_networks",
+            "mcna": "most_connected_networks",
+            "mcn_a": "most_connected_networks",
+            "most_connected_network_2": "most_connected_networks_2",
+            "mcn2": "most_connected_networks_2",
+            "most_connected_network_b": "most_connected_networks_2",
+            "most_connected_networks_b": "most_connected_networks_2",
+            "mcnb": "most_connected_networks_2",
+            "mcn_b": "most_connected_networks_2",
             "landscape_fluidity_a": "landscape_fluidity",
             "landscape_fluidity_a1": "landscape_fluidity",
             "lf_a": "landscape_fluidity",
@@ -612,12 +476,12 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         key = aliases.get(key, key)
         valid = {
             "largest_single_network",
-            "most_connected_habitat",
-            "reachable_habitat_advanced",
+            "most_connected_networks",
+            "most_connected_networks_2",
             "landscape_fluidity",
         }
         if key not in valid:
-            key = "most_connected_habitat"
+            key = "most_connected_networks"
         return key
 
     @classmethod
@@ -625,11 +489,11 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         key = cls._normalize_strategy_key(strategy)
         names = {
             "largest_single_network": "Largest Single Network",
-            "most_connected_habitat": "Most Connected Area",
-            "reachable_habitat_advanced": "Reachable Habitat (Advanced)",
+            "most_connected_networks": "Most Connected Networks A",
+            "most_connected_networks_2": "Most Connected Networks B",
             "landscape_fluidity": "Landscape Fluidity",
         }
-        return names.get(key, "Most Connected Area")
+        return names.get(key, "Most Connected Networks A")
 
     def _inject_help_panel(self) -> None:
         """Add a right-hand help panel fed by a markdown file."""
@@ -743,13 +607,17 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             pct = 0
         msg = (message or "").strip() if message else ""
         same_as_last = pct == self._last_progress_value and msg == (self._last_progress_message or "")
+        if self._last_actual_progress_value is None or pct > int(self._last_actual_progress_value):
+            self._last_actual_progress_value = pct
+            self._progress_stall_ticks = 0
         self._last_progress_value = pct
         self._last_progress_message = msg
         self._display_progress_value = int(max(self._display_progress_value, pct))
         if pct >= 100:
             self._progress_soft_ceiling = 100
         else:
-            self._progress_soft_ceiling = int(max(self._display_progress_value, min(99, pct + 4)))
+            headroom = 12 if pct < 90 else 6
+            self._progress_soft_ceiling = int(max(self._display_progress_value, min(99, pct + headroom)))
         try:
             if self._progress_bar is not None:
                 self._progress_bar.setValue(int(self._display_progress_value))
@@ -767,13 +635,21 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         per_patch = bool(msg) and re.match(r"^(analyzing|finished) patch\\s+\\d+/\\d+", msg, re.IGNORECASE) is not None
         if msg and (not per_patch):
             log_step = 5
-            should_log = msg != (self._last_logged_progress_message or "")
-            if not should_log:
-                last_pct = self._last_logged_progress_value
-                should_log = last_pct is None or abs(pct - last_pct) >= log_step
+            last_pct = self._last_logged_progress_value
+            last_msg = self._last_logged_progress_message or ""
+            last_ts = float(getattr(self, "_last_logged_progress_ts", 0.0) or 0.0)
+            now = time.perf_counter()
+            should_log = False
+            if last_pct is None or pct > int(last_pct):
+                should_log = True
+            elif abs(pct - int(last_pct)) >= log_step:
+                should_log = True
+            elif pct == int(last_pct) and msg != last_msg and (now - last_ts) >= 1.5:
+                should_log = True
             if should_log:
                 self._last_logged_progress_message = msg
                 self._last_logged_progress_value = pct
+                self._last_logged_progress_ts = now
                 self._append_log(f"{pct}% - {msg}", "PROGRESS")
         try:
             QCoreApplication.processEvents()
@@ -783,7 +659,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
     def _init_progress_heartbeat(self) -> None:
         try:
             timer = QTimer(self)
-            timer.setInterval(1500)
+            timer.setInterval(900)
             timer.timeout.connect(self._progress_heartbeat_tick)
             self._progress_heartbeat_timer = timer
         except Exception:
@@ -809,6 +685,16 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         actual = int(self._last_progress_value or 0)
         display = int(self._display_progress_value or 0)
         ceiling = int(max(display, self._progress_soft_ceiling or 0))
+        if self._last_actual_progress_value is None:
+            self._last_actual_progress_value = actual
+        if actual > int(self._last_actual_progress_value or 0):
+            self._last_actual_progress_value = actual
+            self._progress_stall_ticks = 0
+        else:
+            self._progress_stall_ticks = int(self._progress_stall_ticks or 0) + 1
+            if display >= ceiling and actual < 99 and self._progress_stall_ticks >= 3:
+                ceiling = min(99, max(ceiling + 1, actual + 1))
+                self._progress_soft_ceiling = int(ceiling)
         if actual >= 100 or display >= 100:
             return
         if display >= ceiling:
@@ -836,6 +722,8 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self._last_progress_message = None
         self._last_logged_progress_message = None
         self._last_logged_progress_value = None
+        self._last_actual_progress_value = None
+        self._progress_stall_ticks = 0
         self._display_progress_value = 0
         self._progress_soft_ceiling = 0
         try:
@@ -884,7 +772,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
     def _populate_strategy_combo(self, preferred_strategy: Optional[str] = None) -> None:
         layer_type = "vector" if self._current_layer_type == "vector" else "raster"
         strategy_rows = STRATEGY_CHOICES_BY_LAYER.get(layer_type, STRATEGY_CHOICES_BY_LAYER["raster"])
-        target_strategy = str(preferred_strategy or self.strategy_combo.currentData() or "most_connected_habitat")
+        target_strategy = str(preferred_strategy or self.strategy_combo.currentData() or "most_connected_networks")
         target_strategy = self._normalize_strategy_key(target_strategy)
         target_strategy = STRATEGY_FALLBACK_BY_LAYER.get((layer_type, target_strategy), target_strategy)
         self.strategy_combo.clear()
@@ -892,7 +780,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             self.strategy_combo.addItem(label, key)
         idx = self.strategy_combo.findData(target_strategy)
         if idx < 0:
-            idx = self.strategy_combo.findData("most_connected_habitat")
+            idx = self.strategy_combo.findData("most_connected_networks")
         if idx < 0:
             idx = 0
         self.strategy_combo.setCurrentIndex(idx)
@@ -907,22 +795,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self.raster_units_combo.setItemData(2, "imperial")
         self.vector_units_combo.setItemData(0, "metric")
         self.vector_units_combo.setItemData(1, "imperial")
-        self.corridor_cell_assignment_combo.clear()
-        self.corridor_cell_assignment_combo.addItem(
-            "Sum area of patches directly connected",
-            "sum_direct_connected_patches",
-        )
-        self.corridor_cell_assignment_combo.addItem(
-            "Sum area of total network",
-            "sum_total_network_area",
-        )
-        self.corridor_cell_assignment_combo.addItem(
-            "Efficiency (corridor area / connected patches)",
-            "efficiency",
-        )
-        idx = self.corridor_cell_assignment_combo.findData("sum_total_network_area")
-        if idx >= 0:
-            self.corridor_cell_assignment_combo.setCurrentIndex(idx)
         idx = self.pixel_neighborhood_combo.findText("8")
         if idx >= 0:
             self.pixel_neighborhood_combo.setCurrentIndex(idx)
@@ -945,8 +817,8 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         try:
             self.min_patch_size_spin.setMinimum(0)
             self.min_patch_size_spin.setSpecialValueText("")
-            # Raster defaults: 100 px minimum patch size.
-            self.min_patch_size_spin.setValue(100)
+            # Raster defaults: 10 px minimum patch size.
+            self.min_patch_size_spin.setValue(10)
         except Exception:
             pass
         try:
@@ -971,44 +843,17 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         except Exception:
             pass
         try:
-            # Vector defaults (metric): 1 ha budget, 20 m corridor width.
+            # Vector defaults: 1 ha budget, 20 m corridor width, 5 km search radius.
             if self.vector_units_combo.currentData() == "imperial":
                 self.vector_budget_spin.setValue(round(1.0 * 2.471053814, 4))  # ha -> ac
                 self.vector_min_corridor_width_spin.setValue(round(20.0 * 3.280839895, 4))  # m -> ft
+                self.vector_max_search_spin.setValue(round(5.0 * 0.621371192237334, 4))  # km -> mi
             else:
                 self.vector_budget_spin.setValue(1.0)
                 self.vector_min_corridor_width_spin.setValue(20.0)
+                self.vector_max_search_spin.setValue(5.0)
         except Exception:
             pass
-        try:
-            self.pc_alpha_spin.setValue(1000.0)
-            self.pc_cutoff_spin.setValue(3000.0)
-            self.redundancy_method_combo.setCurrentIndex(0)  # IME by default
-            self.redundancy_sample_points_spin.setValue(50)
-            self.redundancy_pair_samples_spin.setValue(200)
-            self.mobility_lambda_intra_spin.setValue(0.001)
-            self.mobility_tau_spin.setValue(0.90)
-            self.resiliency_shortcut_threshold_spin.setValue(3.0)
-            self.weight_m_spin.setValue(0.20)
-            self.weight_lcc_spin.setValue(0.20)
-            self.weight_pc_spin.setValue(0.20)
-            self.weight_f_spin.setValue(0.20)
-        except Exception:
-            pass
-        try:
-            self.habitat_availability_dispersal_spin.setValue(1000.0)
-            self.habitat_availability_kernel_combo.setCurrentIndex(
-                max(0, self.habitat_availability_kernel_combo.findData(HABITAT_AVAILABILITY_DEFAULT_KERNEL))
-            )
-            self.habitat_availability_scaling_combo.setCurrentIndex(
-                max(0, self.habitat_availability_scaling_combo.findData(HABITAT_AVAILABILITY_DEFAULT_SCALING))
-            )
-            self.habitat_availability_min_patch_spin.setValue(0.0)
-            self._update_habitat_availability_units_labels()
-            self._populate_habitat_availability_quality_fields()
-        except Exception:
-            pass
-
     def _load_help_content(self) -> None:
         """Load markdown help content into the right-hand panel."""
         if self._help_browser is None:
@@ -1236,8 +1081,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 base_name = f"{layer.name()}_terralink.gpkg"
                 self.vector_output_name_line.setText(base_name)
             self._update_vector_obstacle_selector_text()
-        self._populate_habitat_availability_quality_fields()
-        self._update_habitat_availability_controls_visibility()
 
     def _on_temporary_toggled(self, checked: bool):
         self.output_dir_line.setEnabled(not checked)
@@ -1260,7 +1103,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                     round(self.vector_min_corridor_width_spin.value() * 3.280839895, 4)
                 )
                 self.vector_max_search_spin.setValue(
-                    round(self.vector_max_search_spin.value() * 3.280839895, 4)
+                    round(self.vector_max_search_spin.value() * 0.621371192237334, 4)
                 )
                 self.vector_min_patch_size_spin.setValue(
                     round(self.vector_min_patch_size_spin.value() * 2.471053814, 4)
@@ -1268,19 +1111,13 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 self.vector_budget_spin.setValue(
                     round(self.vector_budget_spin.value() * 2.471053814, 4)
                 )
-                self.habitat_availability_dispersal_spin.setValue(
-                    round(self.habitat_availability_dispersal_spin.value() * 3.280839895, 4)
-                )
-                self.habitat_availability_min_patch_spin.setValue(
-                    round(self.habitat_availability_min_patch_spin.value() * 2.471053814, 4)
-                )
             else:
                 # Convert imperial to metric
                 self.vector_min_corridor_width_spin.setValue(
                     round(self.vector_min_corridor_width_spin.value() * 0.3048, 4)
                 )
                 self.vector_max_search_spin.setValue(
-                    round(self.vector_max_search_spin.value() * 0.3048, 4)
+                    round(self.vector_max_search_spin.value() * 1.609344, 4)
                 )
                 self.vector_min_patch_size_spin.setValue(
                     round(self.vector_min_patch_size_spin.value() * 0.404685642, 4)
@@ -1288,29 +1125,22 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 self.vector_budget_spin.setValue(
                     round(self.vector_budget_spin.value() * 0.404685642, 4)
                 )
-                self.habitat_availability_dispersal_spin.setValue(
-                    round(self.habitat_availability_dispersal_spin.value() * 0.3048, 4)
-                )
-                self.habitat_availability_min_patch_spin.setValue(
-                    round(self.habitat_availability_min_patch_spin.value() * 0.404685642, 4)
-                )
             self._vector_unit_system = new_units
 
         if self.vector_units_combo.currentData() == "imperial":
             self.label_vector_min_width.setText("Corridor Width (ft):")
-            self.label_vector_max_search.setText("Max Search Distance (ft):")
+            self.label_vector_max_search.setText("Search Radius (mi):")
             self.label_vector_min_patch.setText("Min Patch Size (ac):")
             self.label_vector_budget.setText("Budget (ac):")
             if hasattr(self, "label_vector_max_area"):
                 self.label_vector_max_area.setText("Max Corridor Area (ac):")
         else:
             self.label_vector_min_width.setText("Corridor Width (m):")
-            self.label_vector_max_search.setText("Max Search Distance (m):")
+            self.label_vector_max_search.setText("Search Radius (km):")
             self.label_vector_min_patch.setText("Min Patch Size (ha):")
             self.label_vector_budget.setText("Budget (ha):")
             if hasattr(self, "label_vector_max_area"):
                 self.label_vector_max_area.setText("Max Corridor Area (ha):")
-        self._update_habitat_availability_units_labels()
 
     def _map_units_to_meters(self, units: int) -> Optional[float]:
         if units == QgsUnitTypes.DistanceMeters:
@@ -1377,118 +1207,65 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                         return value * pixel_area_m2 / 10000.0
                     return value * pixel_area_m2 / 4046.8564224
 
-                def dist_to_pixels(value: float, units: str) -> float:
+                def width_to_pixels(value: float, units: str) -> float:
                     if units == "pixels":
                         return value
                     if units == "metric":
                         return value / pixel_size_m
                     return (value * 0.3048) / pixel_size_m
 
-                def dist_from_pixels(value: float, units: str) -> float:
+                def width_from_pixels(value: float, units: str) -> float:
                     if units == "pixels":
                         return value
                     if units == "metric":
                         return value * pixel_size_m
                     return value * pixel_size_m / 0.3048
 
+                def search_to_pixels(value: float, units: str) -> float:
+                    if units == "pixels":
+                        return value
+                    if units == "metric":
+                        return (value * 1000.0) / pixel_size_m
+                    return (value * 1609.344) / pixel_size_m
+
+                def search_from_pixels(value: float, units: str) -> float:
+                    if units == "pixels":
+                        return value
+                    if units == "metric":
+                        return (value * pixel_size_m) / 1000.0
+                    return (value * pixel_size_m) / 1609.344
+
                 old_units = self._raster_unit_system
                 min_patch_px = area_to_pixels(float(self.min_patch_size_spin.value()), old_units)
                 budget_px = area_to_pixels(float(self.budget_spin.value()), old_units)
-                min_width_px = dist_to_pixels(float(self.min_corridor_width_spin.value()), old_units)
-                max_search_px = dist_to_pixels(float(self.max_search_spin.value()), old_units)
-                species_min_patch_px = area_to_pixels(float(self.habitat_availability_min_patch_spin.value()), old_units)
-                species_disp_px = dist_to_pixels(float(self.habitat_availability_dispersal_spin.value()), old_units)
-
+                min_width_px = width_to_pixels(float(self.min_corridor_width_spin.value()), old_units)
+                max_search_px = search_to_pixels(float(self.max_search_spin.value()), old_units)
                 self.min_patch_size_spin.setValue(int(round(max(0.0, area_from_pixels(min_patch_px, new_units)))))
                 self.budget_spin.setValue(int(round(max(0.0, area_from_pixels(budget_px, new_units)))))
                 self.min_corridor_width_spin.setValue(
-                    int(round(max(1.0, dist_from_pixels(min_width_px, new_units))))
+                    int(round(max(1.0, width_from_pixels(min_width_px, new_units))))
                 )
-                self.max_search_spin.setValue(int(round(max(0.0, dist_from_pixels(max_search_px, new_units)))))
-                self.habitat_availability_min_patch_spin.setValue(
-                    max(0.0, area_from_pixels(species_min_patch_px, new_units))
-                )
-                self.habitat_availability_dispersal_spin.setValue(
-                    max(0.0, dist_from_pixels(species_disp_px, new_units))
-                )
+                self.max_search_spin.setValue(int(round(max(0.0, search_from_pixels(max_search_px, new_units)))))
 
         self._raster_unit_system = new_units
         if new_units == "imperial":
             self.label_7.setText("Min patch size (ac):")
             self.label_8.setText("Budget (ac):")
             self.label_10.setText("Corridor width (ft):")
-            self.label_9.setText("Max search distance (ft):")
+            self.label_9.setText("Search radius (mi):")
         elif new_units == "metric":
             self.label_7.setText("Min patch size (ha):")
             self.label_8.setText("Budget (ha):")
             self.label_10.setText("Corridor width (m):")
-            self.label_9.setText("Max search distance (m):")
+            self.label_9.setText("Search radius (km):")
         else:
             self.label_7.setText("Min patch size (px):")
             self.label_8.setText("Budget (px):")
             self.label_10.setText("Corridor width (px):")
-            self.label_9.setText("Max search distance (px):")
-        self._update_habitat_availability_units_labels()
+            self.label_9.setText("Search radius (px):")
 
     def _on_strategy_changed(self, _index: int):
         self._update_strategy_help()
-
-    def _is_habitat_availability_strategy(self) -> bool:
-        key = self._normalize_strategy_key(self.strategy_combo.currentData() or self.strategy_combo.currentText())
-        return key == "reachable_habitat_advanced"
-
-    def _update_habitat_availability_controls_visibility(self) -> None:
-        try:
-            self.habitat_availability_options.setVisible(self._is_habitat_availability_strategy())
-        except Exception:
-            pass
-        try:
-            enable_quality = self._current_layer_type == "vector"
-            self.habitat_availability_quality_combo.setEnabled(enable_quality)
-        except Exception:
-            pass
-
-    def _current_habitat_availability_unit_mode(self) -> str:
-        if self._current_layer_type == "vector":
-            return str(self.vector_units_combo.currentData() or "metric")
-        return str(self.raster_units_combo.currentData() or "pixels")
-
-    def _update_habitat_availability_units_labels(self) -> None:
-        unit_mode = self._current_habitat_availability_unit_mode()
-        if unit_mode == "imperial":
-            dist_label = "ft"
-            area_label = "ac"
-        elif unit_mode == "metric":
-            dist_label = "m"
-            area_label = "ha"
-        else:
-            dist_label = "px"
-            area_label = "px"
-        self.habitat_availability_dispersal_label.setText(f"Species dispersal distance ({dist_label}):")
-        self.habitat_availability_min_patch_label.setText(f"Min patch area for species ({area_label}):")
-
-    def _populate_habitat_availability_quality_fields(self) -> None:
-        combo = getattr(self, "habitat_availability_quality_combo", None)
-        if combo is None:
-            return
-        current_value = str(combo.currentData() or "")
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem("(None)", "")
-        if self._current_layer_type == "vector":
-            layer = self._layer_from_index(self.input_layer_combo.currentIndex())
-            if isinstance(layer, QgsVectorLayer) and layer.isValid():
-                for field in layer.fields():
-                    try:
-                        name = str(field.name())
-                    except Exception:
-                        continue
-                    combo.addItem(name, name)
-        else:
-            combo.addItem("Not available for raster", "")
-        idx = combo.findData(current_value)
-        combo.setCurrentIndex(idx if idx >= 0 else 0)
-        combo.blockSignals(False)
 
     def _update_obstacle_controls(self, enabled: bool):
         is_enabled = bool(enabled)
@@ -1517,7 +1294,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
     def _on_layer_type_changed(self, text: str):
         previous_strategy = self.strategy_combo.currentData() or self.strategy_combo.currentText()
         self._current_layer_type = (text or "Raster").lower()
-        self._populate_strategy_combo(str(previous_strategy or "most_connected_habitat"))
+        self._populate_strategy_combo(str(previous_strategy or "most_connected_networks"))
         self._update_group_visibility()
         self.populate_layers()
 
@@ -1549,9 +1326,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 pass
         if hasattr(self, "_vector_output_name_row"):
             self._vector_output_name_row.setVisible(not is_raster)
-        self._update_habitat_availability_units_labels()
-        self._populate_habitat_availability_quality_fields()
-        self._update_habitat_availability_controls_visibility()
 
     # ------------------------------------------------------------------
     # Data extraction helpers
@@ -1582,7 +1356,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         return self._parameters.get("params", {})
 
     def get_strategy(self) -> str:
-        return str(self.strategy_combo.currentData() or "most_connected_habitat")
+        return str(self.strategy_combo.currentData() or "most_connected_networks")
 
     def use_temporary_output(self) -> bool:
         return self._parameters.get("use_temporary_output", False)
@@ -1687,7 +1461,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             "Choose Split to automatically create a singleparts copy, Continue if this is intentional, "
             "or Cancel to stop."
         )
-        split_btn = msg.addButton("Split Features", QMessageBox.ActionRole)
+        split_btn = msg.addButton("Split Features (recommended)", QMessageBox.ActionRole)
         continue_btn = msg.addButton("Continue (Intentional)", QMessageBox.AcceptRole)
         cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
         msg.setDefaultButton(cancel_btn)
@@ -1755,61 +1529,136 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         except Exception:
             return None
 
+    def _confirm_vector_geometry_simplify(
+        self,
+        layer: QgsVectorLayer,
+        summary: Dict[str, object],
+    ) -> str:
+        total_vertices = int(summary.get("total_vertices", 0) or 0)
+        avg_vertices = float(summary.get("avg_vertices_per_feature", 0.0) or 0.0)
+        max_feature_vertices = int(summary.get("max_feature_vertices", 0) or 0)
+        hard_reasons = list(summary.get("hard_reasons", []) or [])
+        example_rows = list(summary.get("top_examples", []) or [])
+        example_text = ", ".join(
+            f"feature {fid} ({count:,} vertices)" for count, fid in example_rows
+        ) or "none listed"
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Geometry Too Complex")
+        msg.setText(
+            f"'{layer.name()}' is too geometrically complex for TerraLink to run reliably."
+        )
+        msg.setInformativeText(
+            f"Patches: {int(summary.get('feature_count', 0) or 0):,}\n"
+            f"Total vertices: {total_vertices:,}\n"
+            f"Average vertices per patch: {avg_vertices:,.0f}\n"
+            f"Largest patch vertices: {max_feature_vertices:,}\n"
+            f"Examples: {example_text}\n\n"
+            f"Triggered limits:\n- " + "\n- ".join(str(x) for x in hard_reasons) + "\n\n"
+            "Choose Simplify to create a simplified copy and retry, or Cancel to stop."
+        )
+        simplify_btn = msg.addButton("Simplify", QMessageBox.ActionRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+        msg.setDefaultButton(cancel_btn)
+        msg.exec_()
+        return "simplify" if msg.clickedButton() == simplify_btn else "cancel"
+
+    def _suggest_vector_simplify_tolerance(self, layer: QgsVectorLayer) -> float:
+        try:
+            ext = layer.extent()
+            max_dim = max(float(ext.width()), float(ext.height()))
+        except Exception:
+            max_dim = 0.0
+        if max_dim <= 0.0:
+            return 1.0
+        return max(max_dim / 5000.0, max_dim / 50000.0)
+
+    def _create_simplified_vector_copy(
+        self,
+        layer: QgsVectorLayer,
+        tolerance: float,
+    ) -> Optional[QgsVectorLayer]:
+        try:
+            geom_type_name = QgsWkbTypes.displayString(layer.wkbType()) or "MultiPolygon"
+            crs_authid = layer.crs().authid() or "EPSG:4326"
+            suffix = str(f"{float(tolerance):.6f}").rstrip("0").rstrip(".").replace(".", "p")
+            out = QgsVectorLayer(f"{geom_type_name}?crs={crs_authid}", f"{layer.name()}_simplified_{suffix}", "memory")
+            if not out.isValid():
+                out = QgsVectorLayer(f"MultiPolygon?crs={crs_authid}", f"{layer.name()}_simplified_{suffix}", "memory")
+            if not out.isValid():
+                return None
+
+            provider = out.dataProvider()
+            provider.addAttributes(list(layer.fields()))
+            out.updateFields()
+
+            out_features: List[QgsFeature] = []
+            for feature in layer.getFeatures():
+                try:
+                    geom = feature.geometry()
+                except Exception:
+                    geom = None
+                if geom is None or geom.isEmpty():
+                    continue
+                try:
+                    simplified = geom.simplify(float(tolerance))
+                except Exception:
+                    simplified = QgsGeometry(geom)
+                if simplified is None or simplified.isEmpty():
+                    simplified = QgsGeometry(geom)
+                try:
+                    simplified = simplified.makeValid()
+                except Exception:
+                    pass
+                if simplified is None or simplified.isEmpty():
+                    continue
+                out_feat = QgsFeature(out.fields())
+                out_feat.setAttributes(feature.attributes())
+                out_feat.setGeometry(simplified)
+                out_features.append(out_feat)
+
+            if not out_features:
+                return None
+
+            provider.addFeatures(out_features)
+            out.updateExtents()
+            QgsProject.instance().addMapLayer(out)
+            return out
+        except Exception:
+            return None
+
+    def _simplify_vector_layer_until_threshold(self, layer: QgsVectorLayer) -> Tuple[Optional[QgsVectorLayer], Optional[Dict[str, object]], Optional[float]]:
+        from .analysis_vector import assess_vector_geometry_complexity
+
+        base_tolerance = self._suggest_vector_simplify_tolerance(layer)
+        tolerance = max(float(base_tolerance), 1e-9)
+        last_summary: Optional[Dict[str, object]] = None
+
+        for _ in range(6):
+            simplified = self._create_simplified_vector_copy(layer, tolerance)
+            if simplified is None or not simplified.isValid():
+                return None, None, None
+            summary = assess_vector_geometry_complexity(simplified)
+            last_summary = summary
+            if not bool(summary.get("exceeds_hard_limit", False)):
+                return simplified, summary, float(tolerance)
+            tolerance *= 2.0
+
+        return None, last_summary, float(tolerance / 2.0)
+
     def _collect_parameters(self) -> Dict:
         params = self._collect_vector_parameters() if self._current_layer_type == "vector" else self._collect_raster_parameters()
-        params["strategy"] = self.strategy_combo.currentData() or "most_connected_habitat"
+        params["strategy"] = self.strategy_combo.currentData() or "most_connected_networks"
         return params
-
-    def _collect_habitat_availability_params(
-        self,
-        *,
-        distance_scale: float = 1.0,
-        area_scale: float = 1.0,
-    ) -> Dict:
-        dispersal_raw = max(0.0, float(self.habitat_availability_dispersal_spin.value()))
-        min_patch_raw = max(0.0, float(self.habitat_availability_min_patch_spin.value()))
-        quality_field = ""
-        if self._current_layer_type == "vector":
-            quality_field = str(self.habitat_availability_quality_combo.currentData() or "").strip()
-        return {
-            "species_dispersal_distance": float(dispersal_raw),
-            "species_dispersal_distance_analysis": float(dispersal_raw * max(float(distance_scale), 1e-12)),
-            "species_dispersal_kernel": normalize_habitat_availability_kernel(
-                self.habitat_availability_kernel_combo.currentData() or HABITAT_AVAILABILITY_DEFAULT_KERNEL
-            ),
-            "min_patch_area_for_species": float(min_patch_raw),
-            "min_patch_area_for_species_analysis": float(min_patch_raw * max(float(area_scale), 1e-12)),
-            "patch_quality_weight_field": quality_field,
-            "patch_area_scaling": normalize_patch_area_scaling(
-                self.habitat_availability_scaling_combo.currentData() or HABITAT_AVAILABILITY_DEFAULT_SCALING
-            ),
-        }
-
-    def _normalized_connectivity_weights(self) -> Tuple[float, float, float, float]:
-        raw = [
-            max(0.0, float(self.weight_m_spin.value())),
-            max(0.0, float(self.weight_lcc_spin.value())),
-            max(0.0, float(self.weight_pc_spin.value())),
-            max(0.0, float(self.weight_f_spin.value())),
-        ]
-        total = sum(raw)
-        if total <= 0:
-            return 0.25, 0.25, 0.25, 0.25
-        return (
-            raw[0] / total,
-            raw[1] / total,
-            raw[2] / total,
-            raw[3] / total,
-        )
 
     def _collect_connectivity_metric_params(
         self,
         *,
         distance_scale: float = 1.0,
     ) -> Dict:
-        w_m, w_lcc, w_pc, w_f = self._normalized_connectivity_weights()
-        alpha_raw = max(0.0, float(self.pc_alpha_spin.value()))
-        cutoff_raw = max(0.0, float(self.pc_cutoff_spin.value()))
+        alpha_raw = 1000.0
+        cutoff_raw = 3000.0
         alpha_analysis = alpha_raw * max(float(distance_scale), 1e-12)
         cutoff_analysis = cutoff_raw * max(float(distance_scale), 1e-12)
         if cutoff_analysis <= 0.0:
@@ -1820,17 +1669,11 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             "pc_cutoff": cutoff_raw,
             "pc_alpha_analysis": float(alpha_analysis),
             "pc_cutoff_analysis": float(cutoff_analysis),
-            "redundancy_method": str(self.redundancy_method_combo.currentData() or "ime"),
-            "sample_points": int(self.redundancy_sample_points_spin.value()),
-            "pair_samples": int(self.redundancy_pair_samples_spin.value()),
-            "mobility_lambda_intra": float(self.mobility_lambda_intra_spin.value()),
-            "mobility_tau": float(self.mobility_tau_spin.value()),
-            "landscape_fluidity_shortcut_threshold": float(self.resiliency_shortcut_threshold_spin.value()),
-            "resiliency_shortcut_threshold": float(self.resiliency_shortcut_threshold_spin.value()),
-            "w_m": float(w_m),
-            "w_lcc": float(w_lcc),
-            "w_pc": float(w_pc),
-            "w_f": float(w_f),
+            "redundancy_method": "ime",
+            "sample_points": 50,
+            "pair_samples": 200,
+            "landscape_fluidity_shortcut_threshold": 3.0,
+            "resiliency_shortcut_threshold": 3.0,
         }
 
     def _collect_raster_parameters(self) -> Dict:
@@ -1870,18 +1713,20 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             pixel_size_m = max(res_x_m, res_y_m)
             if units == "metric":
                 area_factor = 10000.0
-                dist_factor = 1.0
+                width_dist_factor = 1.0
+                search_dist_factor = 1000.0
             else:
                 area_factor = 4046.8564224
-                dist_factor = 0.3048
+                width_dist_factor = 0.3048
+                search_dist_factor = 1609.344
             min_patch_px = int(round((min_patch_value * area_factor) / pixel_area_m2))
             budget_px = int(round((budget_value * area_factor) / pixel_area_m2))
-            min_width_px = int(round((min_width_value * dist_factor) / pixel_size_m))
-            max_search_px = int(round((max_search_value * dist_factor) / pixel_size_m))
+            min_width_px = int(round((min_width_value * width_dist_factor) / pixel_size_m))
+            max_search_px = int(round((max_search_value * search_dist_factor) / pixel_size_m))
             if analysis_is_metric:
-                connectivity_distance_scale = dist_factor
+                connectivity_distance_scale = width_dist_factor
             else:
-                connectivity_distance_scale = dist_factor / max(pixel_size_m, 1e-12)
+                connectivity_distance_scale = width_dist_factor / max(pixel_size_m, 1e-12)
         params = {
             "patch_connectivity": connectivity,
             "patch_mode": "value",
@@ -1902,8 +1747,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             "obstacle_range_lower": None,
             "obstacle_range_upper": None,
             "raster_units": units,
-            "corridor_cell_assignment": self.corridor_cell_assignment_combo.currentData()
-            or "sum_total_network_area",
+            "corridor_cell_assignment": "sum_total_network_area",
         }
 
         if pixel_sizes is not None:
@@ -1911,12 +1755,12 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 params["delegate_min_patch_size_ha"] = float(min_patch_value)
                 params["delegate_budget_area_ha"] = float(budget_value)
                 params["delegate_min_corridor_width_m"] = float(min_width_value)
-                params["delegate_max_search_distance_m"] = float(max_search_value)
+                params["delegate_max_search_distance_m"] = float(max_search_value) * 1000.0
             elif units == "imperial":
                 params["delegate_min_patch_size_ha"] = float(min_patch_value) * 4046.8564224 / 10000.0
                 params["delegate_budget_area_ha"] = float(budget_value) * 4046.8564224 / 10000.0
                 params["delegate_min_corridor_width_m"] = float(min_width_value) * 0.3048
-                params["delegate_max_search_distance_m"] = float(max_search_value) * 0.3048
+                params["delegate_max_search_distance_m"] = float(max_search_value) * 1609.344
 
         values = self._parse_values(self.patch_value_line.text())
         if not values:
@@ -1931,12 +1775,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         params.update(
             self._collect_connectivity_metric_params(
                 distance_scale=connectivity_distance_scale,
-            )
-        )
-        params.update(
-            self._collect_habitat_availability_params(
-                distance_scale=connectivity_distance_scale,
-                area_scale=area_factor / max(pixel_area_m2, 1e-12) if units != "pixels" else 1.0,
             )
         )
 
@@ -1964,12 +1802,13 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
 
         if units == "imperial":
             width_value *= 0.3048
-            search_value *= 0.3048
+            search_value *= 1609.344
             min_patch_value *= 0.404685642
             budget_value *= 0.404685642
             resolution_value *= 0.3048
             connectivity_distance_scale = 0.3048
         else:
+            search_value *= 1000.0
             connectivity_distance_scale = 1.0
         # Max corridor area removed from UI; no explicit limit is passed.
 
@@ -1989,12 +1828,6 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         params.update(
             self._collect_connectivity_metric_params(
                 distance_scale=connectivity_distance_scale,
-            )
-        )
-        params.update(
-            self._collect_habitat_availability_params(
-                distance_scale=connectivity_distance_scale,
-                area_scale=1.0,
             )
         )
         return params
@@ -2057,6 +1890,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
 
         try:
             params = self._collect_parameters()
+            params["result_input_name"] = layer.name()
         except ValueError as exc:
             self._append_log(str(exc), "ERROR")
             self._finish_progress_display(final_value=0, status_text="Run stopped")
@@ -2068,7 +1902,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 pass
             return
 
-        strategy = params.pop("strategy", "most_connected_habitat")
+        strategy = params.pop("strategy", "most_connected_networks")
 
         # Ensure usable output directory (even for temporary runs)
         if use_temporary:
@@ -2112,6 +1946,13 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                     feat_count = layer.featureCount()
                 except Exception:
                     feat_count = 0
+                from .analysis_vector import (
+                    _format_vector_landscape_scale_error,
+                    assess_vector_geometry_complexity,
+                    assess_vector_landscape_scale,
+                    get_utm_crs_from_extent,
+                )
+
                 shared_summary = self._count_feature_polygon_parts(layer)
                 has_shared_feature_groups = int(shared_summary.get("multipart_features", 0) or 0) > 0
                 if feat_count <= 1 and not has_shared_feature_groups:
@@ -2128,6 +1969,103 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                     except Exception:
                         pass
                     return
+                complexity_summary = assess_vector_geometry_complexity(layer)
+                if bool(complexity_summary.get("exceeds_hard_limit", False)):
+                    complexity_action = self._confirm_vector_geometry_simplify(layer, complexity_summary)
+                    if complexity_action == "cancel":
+                        self._append_log(
+                            "Run canceled by user. Simplify the vector geometry and rerun.",
+                            "WARNING",
+                        )
+                        self._finish_progress_display(final_value=0, status_text="Run canceled")
+                        self._run_in_progress = False
+                        try:
+                            if ok_btn is not None:
+                                ok_btn.setEnabled(True)
+                        except Exception:
+                            pass
+                        return
+                    self._append_log(
+                        "Input geometry exceeds TerraLink complexity limits. Attempting iterative simplification.",
+                        "WARNING",
+                    )
+                    simplified_layer, simplified_summary, used_tolerance = self._simplify_vector_layer_until_threshold(layer)
+                    if simplified_layer is None or not simplified_layer.isValid():
+                        if simplified_summary:
+                            self._append_log(
+                                (
+                                    "Automatic simplification did not reduce the layer below TerraLink's "
+                                    f"complexity limit. Remaining totals: "
+                                    f"{int(simplified_summary.get('total_vertices', 0) or 0):,} total vertices, "
+                                    f"{float(simplified_summary.get('avg_vertices_per_feature', 0.0) or 0.0):,.0f} average vertices/patch."
+                                ),
+                                "ERROR",
+                            )
+                        else:
+                            self._append_log(
+                                "Automatic simplification failed before TerraLink could retry the run.",
+                                "ERROR",
+                            )
+                        self._finish_progress_display(final_value=0, status_text="Run stopped")
+                        self._run_in_progress = False
+                        try:
+                            if ok_btn is not None:
+                                ok_btn.setEnabled(True)
+                        except Exception:
+                            pass
+                        return
+                    layer = simplified_layer
+                    self._append_log(
+                        (
+                            f"Created simplified layer '{layer.name()}' using tolerance {float(used_tolerance or 0.0):.6f}. "
+                            f"Continuing with {int(simplified_summary.get('total_vertices', 0) or 0):,} total vertices."
+                        ),
+                        "INFO",
+                    )
+                    shared_summary = self._count_feature_polygon_parts(layer)
+                    try:
+                        self._parameters["layer_id"] = layer.id()
+                    except Exception:
+                        pass
+                    complexity_summary = assess_vector_geometry_complexity(layer)
+                    if bool(complexity_summary.get("exceeds_hard_limit", False)):
+                        for line in self._format_run_error(
+                            "Automatic simplification completed, but the simplified layer still exceeds TerraLink's "
+                            "geometry complexity limits."
+                        ):
+                            self._append_log(line, "ERROR")
+                        self._finish_progress_display(final_value=0, status_text="Run stopped")
+                        self._run_in_progress = False
+                        try:
+                            if ok_btn is not None:
+                                ok_btn.setEnabled(True)
+                        except Exception:
+                            pass
+                        return
+                try:
+                    target_crs = get_utm_crs_from_extent(layer)
+                    scale_summary = assess_vector_landscape_scale(
+                        layer,
+                        target_crs,
+                        requested_max_search_distance=float(params.get("max_search_distance", 0.0) or 0.0),
+                    )
+                except Exception:
+                    scale_summary = {}
+                if bool(scale_summary.get("exceeds_hard_limit", False)):
+                    for line in _format_vector_landscape_scale_error(scale_summary).splitlines():
+                        self._append_log(line, "ERROR")
+                    self._finish_progress_display(final_value=0, status_text="Run stopped")
+                    self._run_in_progress = False
+                    try:
+                        if ok_btn is not None:
+                            ok_btn.setEnabled(True)
+                    except Exception:
+                        pass
+                    return
+                if bool(scale_summary.get("exceeds_warning_limit", False)):
+                    warning_text = "; ".join(str(x) for x in list(scale_summary.get("warning_reasons", []) or []))
+                    if warning_text:
+                        self._append_log(f"Landscape scale warning: {warning_text}", "WARNING")
                 shared_action = self._confirm_vector_shared_patch_features(layer, summary=shared_summary)
                 if shared_action == "cancel":
                     self._append_log(
@@ -2175,7 +2113,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
 
             results = []
             if self._current_layer_type == "vector":
-                from .analysis_vector import VectorAnalysisError, run_vector_analysis
+                from .analysis_vector import run_vector_analysis
 
                 results = run_vector_analysis(
                     layer,
@@ -2188,7 +2126,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                     log_cb=self._append_log,
                 )
             else:
-                from .analysis_raster import RasterAnalysisError, run_raster_analysis
+                from .analysis_raster import run_raster_analysis
 
                 results = run_raster_analysis(
                     layer,
@@ -2235,11 +2173,11 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                         except Exception:
                             pass
                     self._append_log(f"  Budget used: {budget_used}/{budget_total}", "SUMMARY")
-                if "bigconnect_objective_post" in stats:
-                    area_value = stats.get("bigconnect_objective_post", 0)
+                if "networkmerge_objective_post" in stats:
+                    area_value = stats.get("networkmerge_objective_post", 0)
                     area_units = ""
                     if self._current_layer_type == "vector":
-                        area_value = stats.get("bigconnect_objective_display", area_value)
+                        area_value = stats.get("networkmerge_objective_display", area_value)
                         area_units = str(stats.get("area_units_label", "") or "").strip()
                         try:
                             area_display = f"{float(area_value):.2f}"
@@ -2254,96 +2192,17 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                     if area_units:
                         area_display = f"{area_display} {area_units}"
                     self._append_log(
-                        f"  Most Connected Area: {area_display}",
+                        f"  Connected network area: {area_display}",
                         "SUMMARY",
                     )
-                if "bigconnect_proven_optimal" in stats:
+                if "networkmerge_proven_optimal" in stats:
                     self._append_log(
-                        f"  Most Connected Area (proven optimal): {bool(stats.get('bigconnect_proven_optimal', False))}",
+                        f"  Connected network area (proven optimal): {bool(stats.get('networkmerge_proven_optimal', False))}",
                         "SUMMARY",
                     )
                 metrics_path = (stats.get("landscape_metrics_path") or "").strip()
                 if metrics_path:
                     self._append_log(f"  Landscape metrics: {metrics_path}", "SUMMARY")
-                if self._current_layer_type == "raster":
-                    timing_records = stats.get("timing_records") or []
-                    total_s = stats.get("elapsed_s")
-                    if timing_records or total_s is not None:
-                        self._append_log("  Timing breakdown:", "SUMMARY")
-                        try:
-                            for entry in timing_records:
-                                label = str((entry or {}).get("label", "") or "").strip()
-                                duration = (entry or {}).get("duration_s", None)
-                                if not label:
-                                    continue
-                                try:
-                                    dur_val = float(duration) if duration is not None else None
-                                except Exception:
-                                    dur_val = None
-                                if dur_val is None:
-                                    self._append_log(f"    {label}: (n/a)", "SUMMARY")
-                                else:
-                                    self._append_log(f"    {label}: {dur_val:.2f}s", "SUMMARY")
-                        except Exception:
-                            pass
-                        try:
-                            if total_s is not None:
-                                self._append_log(f"    Total wall time: {float(total_s):.2f}s", "SUMMARY")
-                        except Exception:
-                            pass
-
-                    # Optional candidate-search micro-timings (when available).
-                    details = stats.get("candidate_search_detail") or {}
-                    durations = (details.get("durations_s") or {}) if isinstance(details, dict) else {}
-                    counts = (details.get("counts") or {}) if isinstance(details, dict) else {}
-                    if isinstance(durations, dict) and durations:
-                        try:
-                            top = sorted(
-                                ((str(k), float(v)) for k, v in durations.items()),
-                                key=lambda kv: kv[1],
-                                reverse=True,
-                            )[:8]
-                            self._append_log("  Candidate search details (top):", "SUMMARY")
-                            for label, sec in top:
-                                count = counts.get(label, None) if isinstance(counts, dict) else None
-                                suffix = f" (n={int(count)})" if count is not None else ""
-                                self._append_log(f"    {label}: {sec:.2f}s{suffix}", "SUMMARY")
-                        except Exception:
-                            pass
-
-                    # Optional deep pathfinding breakdown (enabled via TERRALINK_PROFILE_PATHFIND=1).
-                    profile = details.get("pathfind_profile") if isinstance(details, dict) else None
-                    if isinstance(profile, dict) and profile:
-                        try:
-                            self._append_log("  Pathfinding profile:", "SUMMARY")
-                            items = []
-                            for k, v in profile.items():
-                                if not isinstance(v, dict):
-                                    continue
-                                try:
-                                    total = float(v.get("call_total_s", 0.0) or 0.0)
-                                except Exception:
-                                    total = 0.0
-                                items.append((str(k), total, v))
-                            items.sort(key=lambda t: t[1], reverse=True)
-                            for label, total_s, pf in items[:6]:
-                                calls = int(float(pf.get("calls", 0.0) or 0.0))
-                                avg = (float(total_s) / float(calls)) if calls > 0 else 0.0
-                                loop_s = float(pf.get("loop_s", 0.0) or 0.0)
-                                rec_s = float(pf.get("reconstruct_s", 0.0) or 0.0)
-                                setup_s = float(pf.get("ghost_mask_s", 0.0) or 0.0) + float(pf.get("start_positions_s", 0.0) or 0.0) + float(pf.get("heap_init_s", 0.0) or 0.0)
-                                pops = int(float(pf.get("heap_pops", 0.0) or 0.0))
-                                relax = int(float(pf.get("relaxations", 0.0) or 0.0))
-                                dense_sum = float(pf.get("dense_mode", 0.0) or 0.0)
-                                dense_pct = (100.0 * dense_sum / float(calls)) if calls > 0 else 0.0
-                                pct_loop = (100.0 * loop_s / total_s) if total_s > 1e-12 else 0.0
-                                self._append_log(
-                                    f"    {label}: {total_s:.2f}s (n={calls}, avg={avg:.3f}s) dense={dense_pct:.0f}% setup={setup_s:.2f}s loop={loop_s:.2f}s ({pct_loop:.0f}%) rec={rec_s:.2f}s pops={pops} relax={relax}",
-                                    "SUMMARY",
-                                )
-                        except Exception:
-                            pass
-
         else:
             self._append_log("No results were produced by the run.", "WARNING")
 
