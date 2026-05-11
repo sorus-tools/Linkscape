@@ -41,14 +41,14 @@ FORM_CLASS, _ = uic.loadUiType(os.path.join(
 STRATEGY_CHOICES_BY_LAYER = {
     "raster": [
         ("Largest Single Network", "largest_single_network"),
-        ("Most Connected Networks A", "most_connected_networks"),
-        ("Most Connected Networks B", "most_connected_networks_2"),
+        ("Most Connected Networks B", "most_connected_networks"),
+        ("Most Connected Networks A", "most_connected_networks_2"),
         ("Landscape Fluidity", "landscape_fluidity"),
     ],
     "vector": [
         ("Largest Single Network", "largest_single_network"),
-        ("Most Connected Networks A", "most_connected_networks"),
-        ("Most Connected Networks B", "most_connected_networks_2"),
+        ("Most Connected Networks B", "most_connected_networks"),
+        ("Most Connected Networks A", "most_connected_networks_2"),
         ("Landscape Fluidity", "landscape_fluidity"),
     ],
 }
@@ -434,13 +434,13 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             text = "Prioritize one dominant connected network under budget."
         elif key == "most_connected_networks":
             text = (
-                "Original MCN behavior. Favors total connected subnetwork area with additional search and cleanup "
-                "logic that can still consolidate stronger subnetworks."
+                "Favors total connected subnetwork area with additional search and cleanup logic that can still "
+                "consolidate stronger subnetworks."
             )
         elif key == "most_connected_networks_2":
             text = (
-                "Rank corridor candidates by the value of the subnetworks they join per unit cost, without giving "
-                "special preference to a dominant backbone."
+                "Rank corridor candidates by the value of the subnetworks they join per unit cost. Patches already "
+                "inside connected subnetworks can still be used in additional valuable joins."
             )
         elif key == "landscape_fluidity":
             text = "Improve landscape fluidity by adding corridors that meaningfully reduce detours and increase internal mobility."
@@ -456,16 +456,16 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             "most_connected_network_1": "most_connected_networks",
             "most_connected_networks_1": "most_connected_networks",
             "mcn1": "most_connected_networks",
-            "most_connected_network_a": "most_connected_networks",
-            "most_connected_networks_a": "most_connected_networks",
-            "mcna": "most_connected_networks",
-            "mcn_a": "most_connected_networks",
+            "most_connected_network_a": "most_connected_networks_2",
+            "most_connected_networks_a": "most_connected_networks_2",
+            "mcna": "most_connected_networks_2",
+            "mcn_a": "most_connected_networks_2",
             "most_connected_network_2": "most_connected_networks_2",
             "mcn2": "most_connected_networks_2",
-            "most_connected_network_b": "most_connected_networks_2",
-            "most_connected_networks_b": "most_connected_networks_2",
-            "mcnb": "most_connected_networks_2",
-            "mcn_b": "most_connected_networks_2",
+            "most_connected_network_b": "most_connected_networks",
+            "most_connected_networks_b": "most_connected_networks",
+            "mcnb": "most_connected_networks",
+            "mcn_b": "most_connected_networks",
             "landscape_fluidity_a": "landscape_fluidity",
             "landscape_fluidity_a1": "landscape_fluidity",
             "lf_a": "landscape_fluidity",
@@ -489,8 +489,8 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         key = cls._normalize_strategy_key(strategy)
         names = {
             "largest_single_network": "Largest Single Network",
-            "most_connected_networks": "Most Connected Networks A",
-            "most_connected_networks_2": "Most Connected Networks B",
+            "most_connected_networks": "Most Connected Networks B",
+            "most_connected_networks_2": "Most Connected Networks A",
             "landscape_fluidity": "Landscape Fluidity",
         }
         return names.get(key, "Most Connected Networks A")

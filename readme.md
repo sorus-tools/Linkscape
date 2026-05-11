@@ -1,4 +1,4 @@
-# TerraLink QGIS Plugin 1.8.0
+# TerraLink QGIS Plugin 1.8.1
 
 **Ecological corridor planning for habitat connectivity**
 
@@ -121,6 +121,16 @@ TerraLink currently exposes four optimization modes in both raster and vector in
 
 ### Most Connected Networks A
 
+- Goal: prioritize high-value joins between the patches and subnetworks a corridor connects.
+- Best for: landscapes where the value of a corridor should depend on the current patches and networks it joins, not just whether it creates newly counted connected area.
+- Behavior: scores a candidate by the combined value of the patches and networks it joins per unit cost. Patches already inside connected subnetworks are still eligible, so this mode can connect a patch more than once when the additional join is valuable enough.
+- Choose this when:
+  - you want patch-to-patch joins to stay valuable during the run, even if one or both patches get connected by other corridors elsewhere
+  - you want a pair-driven strategy without the explicit single-backbone bias of LSN
+- Example: you have many scattered patches, but want TerraLink to keep valuing strategic joins involving patches or networks that have already been connected elsewhere. MCN A can therefore favor corridors into already valuable networks when the join value is high relative to corridor cost.
+
+### Most Connected Networks B
+
 - Goal: maximize total habitat area that ends up in connected networks.
 - Best for: broad structural connectivity gains where you want more habitat recruited into connected networks.
 - Behavior: scores solutions by connected network area first, then uses lower budget, shorter length, and fewer corridors as tie-breakers. It does not try to force everything into one dominant backbone.
@@ -128,17 +138,7 @@ TerraLink currently exposes four optimization modes in both raster and vector in
   - you want the budget to maximize connected habitat area across the landscape
   - creating several useful networks is acceptable
   - you care more about total connected habitat than about forcing one flagship network
-- Example: you have many scattered patches and want TerraLink to spend a limited corridor budget on the set of links that places the most habitat into connected networks. MCN A mainly rewards corridors that bring new habitat into connected networks; it usually will not add extra alternate routes inside a network unless they are part of a chain or later budget-fill behavior.
-
-### Most Connected Networks B
-
-- Goal: prioritize high-value joins between the patches a corridor connects.
-- Best for: landscapes where the value of a corridor should depend on the current patches and networks it joins, not just whether it creates newly counted connected area.
-- Behavior: scores a candidate by the combined value of the patches and networks it joins per unit cost. Unlike MCN A, patches already inside networks are still eligible, so this mode can reward joining two existing networks if that join is valuable enough.
-- Choose this when:
-  - you want patch-to-patch joins to stay valuable during the run, even if one or both of the patches get connected by other corridors elsewhere.
-  - you want a pair-driven strategy without the explicit single-backbone bias of LSN
-- Example: you have many scattered patches, but want TerraLink to keep valuing strategic joins involving patches or networks that have already been connected elsewhere. MCN B can therefore favor corridors into already valuable networks when the join value is high relative to corridor cost.
+- Example: you have many scattered patches and want TerraLink to spend a limited corridor budget on the set of links that places the most habitat into connected networks. MCN B mainly rewards corridors that bring new habitat into connected networks; it usually will not add extra alternate routes inside a network unless they are part of a chain or later budget-fill behavior.
 
 ### Landscape Fluidity
 
