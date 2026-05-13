@@ -41,14 +41,14 @@ FORM_CLASS, _ = uic.loadUiType(os.path.join(
 STRATEGY_CHOICES_BY_LAYER = {
     "raster": [
         ("Largest Single Network", "largest_single_network"),
-        ("Most Connected Networks B", "most_connected_networks"),
         ("Most Connected Networks A", "most_connected_networks_2"),
+        ("Most Connected Networks B", "most_connected_networks"),
         ("Landscape Fluidity", "landscape_fluidity"),
     ],
     "vector": [
         ("Largest Single Network", "largest_single_network"),
-        ("Most Connected Networks B", "most_connected_networks"),
         ("Most Connected Networks A", "most_connected_networks_2"),
+        ("Most Connected Networks B", "most_connected_networks"),
         ("Landscape Fluidity", "landscape_fluidity"),
     ],
 }
@@ -448,7 +448,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
 
     @staticmethod
     def _normalize_strategy_key(strategy: Optional[str]) -> str:
-        key = str(strategy or "most_connected_networks").strip().lower().replace(" ", "_").replace("-", "_")
+        key = str(strategy or "most_connected_networks_2").strip().lower().replace(" ", "_").replace("-", "_")
         aliases = {
             # Back-compat
             "largest_network": "largest_single_network",
@@ -481,7 +481,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             "landscape_fluidity",
         }
         if key not in valid:
-            key = "most_connected_networks"
+            key = "most_connected_networks_2"
         return key
 
     @classmethod
@@ -772,7 +772,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
     def _populate_strategy_combo(self, preferred_strategy: Optional[str] = None) -> None:
         layer_type = "vector" if self._current_layer_type == "vector" else "raster"
         strategy_rows = STRATEGY_CHOICES_BY_LAYER.get(layer_type, STRATEGY_CHOICES_BY_LAYER["raster"])
-        target_strategy = str(preferred_strategy or self.strategy_combo.currentData() or "most_connected_networks")
+        target_strategy = str(preferred_strategy or self.strategy_combo.currentData() or "most_connected_networks_2")
         target_strategy = self._normalize_strategy_key(target_strategy)
         target_strategy = STRATEGY_FALLBACK_BY_LAYER.get((layer_type, target_strategy), target_strategy)
         self.strategy_combo.clear()
@@ -780,7 +780,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             self.strategy_combo.addItem(label, key)
         idx = self.strategy_combo.findData(target_strategy)
         if idx < 0:
-            idx = self.strategy_combo.findData("most_connected_networks")
+            idx = self.strategy_combo.findData("most_connected_networks_2")
         if idx < 0:
             idx = 0
         self.strategy_combo.setCurrentIndex(idx)
@@ -1294,7 +1294,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
     def _on_layer_type_changed(self, text: str):
         previous_strategy = self.strategy_combo.currentData() or self.strategy_combo.currentText()
         self._current_layer_type = (text or "Raster").lower()
-        self._populate_strategy_combo(str(previous_strategy or "most_connected_networks"))
+        self._populate_strategy_combo(str(previous_strategy or "most_connected_networks_2"))
         self._update_group_visibility()
         self.populate_layers()
 
@@ -1356,7 +1356,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         return self._parameters.get("params", {})
 
     def get_strategy(self) -> str:
-        return str(self.strategy_combo.currentData() or "most_connected_networks")
+        return str(self.strategy_combo.currentData() or "most_connected_networks_2")
 
     def use_temporary_output(self) -> bool:
         return self._parameters.get("use_temporary_output", False)
@@ -1649,7 +1649,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
 
     def _collect_parameters(self) -> Dict:
         params = self._collect_vector_parameters() if self._current_layer_type == "vector" else self._collect_raster_parameters()
-        params["strategy"] = self.strategy_combo.currentData() or "most_connected_networks"
+        params["strategy"] = self.strategy_combo.currentData() or "most_connected_networks_2"
         return params
 
     def _collect_connectivity_metric_params(
@@ -1902,7 +1902,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 pass
             return
 
-        strategy = params.pop("strategy", "most_connected_networks")
+        strategy = params.pop("strategy", "most_connected_networks_2")
 
         # Ensure usable output directory (even for temporary runs)
         if use_temporary:
