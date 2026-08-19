@@ -3983,6 +3983,12 @@ def find_all_possible_corridors(
     accum_durations: Dict[str, float] = defaultdict(float)
     accum_counts: Dict[str, int] = defaultdict(int)
     raster_obstacle_rejects = 0
+    # Vector obstacle overlap is checked again at candidate admission.  Most
+    # candidates are clipped in _create_corridor_geometry, but the Landscape
+    # Fluidity barrier shortcut intentionally preserves its raw geometry.  A
+    # final admission check keeps that shortcut from re-introducing a corridor
+    # through an impassable polygon without changing the optimizer or scoring.
+    vector_obstacle_rejects = 0
     strategy_key = _normalize_strategy_key(strategy)
     fluidity_mode = strategy_key == "landscape_fluidity"
     # Metrics that benefit from alternative corridor geometry variants.
@@ -4059,6 +4065,16 @@ def find_all_possible_corridors(
     if navigator is not None:
         impassable_geoms = navigator.obstacle_geoms
     raster_mask_navigator = bool(navigator is not None and getattr(navigator, "_uses_raster_mask", False))
+    vector_obstacle_union: Optional[QgsGeometry] = None
+    if impassable_geoms and (not raster_mask_navigator):
+        try:
+            vector_obstacle_union = QgsGeometry.unaryUnion(
+                [g for g in impassable_geoms if g and (not g.isEmpty())]
+            ).makeValid()
+            if vector_obstacle_union is not None and vector_obstacle_union.isEmpty():
+                vector_obstacle_union = None
+        except Exception:
+            vector_obstacle_union = None
 
     # Maintain a bounded set of spatially distinct candidates per patch-pair.
     candidates_by_pair: Dict[Tuple[int, int], List[Dict]] = defaultdict(list)
@@ -4217,6 +4233,7 @@ def find_all_possible_corridors(
         store[key] = existing
 
     def _push_candidate(cand: Dict) -> None:
+        nonlocal vector_obstacle_rejects
         try:
             p1 = int(cand.get("patch1"))
             p2 = int(cand.get("patch2"))
@@ -4232,6 +4249,16 @@ def find_all_possible_corridors(
         if geom is None or geom.isEmpty():
             _dbg("skip: empty geom")
             return
+        if vector_obstacle_union is not None:
+            try:
+                overlap = geom.intersection(vector_obstacle_union)
+                overlap_area = float(overlap.area()) if overlap is not None and (not overlap.isEmpty()) else 0.0
+            except Exception:
+                overlap_area = 0.0
+            if overlap_area > 1e-9:
+                vector_obstacle_rejects += 1
+                _dbg("skip: corridor overlaps vector impassable")
+                return
         cand_eval = dict(cand)
         try:
             est_cost = float(cand_eval.get("area_ha", 0.0) or 0.0)
@@ -4990,7 +5017,7 @@ def find_all_possible_corridors(
                     p2_xy = cand_t2
 
                     try:
-                        if navigator:
+                        if navigator and bool(getattr(params, "vector_routing_enabled", False)):
                             path_points = navigator.find_path(
                                 p1_xy,
                                 p2_xy,
@@ -6544,6 +6571,7 @@ def find_all_possible_corridors(
             timing_out["candidates"] = len(all_corridors)
             timing_out["candidate_timed_out"] = bool(candidate_timed_out)
             timing_out["raster_obstacle_rejects"] = int(raster_obstacle_rejects)
+            timing_out["vector_obstacle_rejects"] = int(vector_obstacle_rejects)
         except Exception:
             pass
 
@@ -19900,6 +19928,47 @@ def run_vector_analysis(
                 int(candidate_timing.get("raster_obstacle_rejects", 0) or 0) + int(raster_candidate_rejects)
             )
             candidate_timing["candidates"] = int(len(all_possible))
+
+    # Objective-rescue and late refill paths can construct candidates outside
+    # the primary admission helper. Apply the same explicit vector obstacle
+    # check to the complete candidate pool so no later optimization branch can
+    # reintroduce a corridor that overlaps an impassable polygon.
+    vector_obstacle_union = None
+    if navigator is not None and not getattr(navigator, "_uses_raster_mask", False):
+        try:
+            vector_obstacle_union = QgsGeometry.unaryUnion(
+                [g for g in (getattr(navigator, "obstacle_geoms", None) or []) if g and not g.isEmpty()]
+            ).makeValid()
+            if vector_obstacle_union is not None and vector_obstacle_union.isEmpty():
+                vector_obstacle_union = None
+        except Exception:
+            vector_obstacle_union = None
+
+    def _vector_candidate_overlaps_obstacle(row: Dict[str, Any]) -> bool:
+        if vector_obstacle_union is None:
+            return False
+        geom = row.get("geom") if isinstance(row, dict) else None
+        if geom is None or geom.isEmpty():
+            return False
+        try:
+            overlap = geom.intersection(vector_obstacle_union)
+            return bool(overlap is not None and not overlap.isEmpty() and float(overlap.area()) > 1e-9)
+        except Exception:
+            return False
+
+    if vector_obstacle_union is not None and all_possible:
+        before_vector_filter = len(all_possible)
+        all_possible = [c for c in all_possible if not _vector_candidate_overlaps_obstacle(c)]
+        vector_filtered = int(before_vector_filter - len(all_possible))
+        if vector_filtered > 0:
+            candidate_timing["vector_obstacle_rejects"] = int(
+                int(candidate_timing.get("vector_obstacle_rejects", 0) or 0) + vector_filtered
+            )
+            candidate_timing["candidates"] = int(len(all_possible))
+            print(
+                "  ✓ Removed vector-overlapping candidates before optimization: "
+                f"{vector_filtered}"
+            )
     strategy = strategy_key
 
     print("\nTOP 20 CANDIDATES BY COST:")
@@ -19992,6 +20061,8 @@ def run_vector_analysis(
         stats["candidate_count"] = int(candidate_timing.get("candidates", len(all_possible)) or len(all_possible))
     if "raster_obstacle_rejects" in candidate_timing:
         stats["raster_obstacle_rejects"] = int(candidate_timing.get("raster_obstacle_rejects", 0) or 0)
+    if "vector_obstacle_rejects" in candidate_timing:
+        stats["vector_obstacle_rejects"] = int(candidate_timing.get("vector_obstacle_rejects", 0) or 0)
 
     if strategy_key in {"most_connected_networks", "largest_single_network"} and corridors:
         budget_limit_ha = float(params.budget_area or 0.0)
@@ -20024,6 +20095,10 @@ def run_vector_analysis(
                     ctx=ctx,
                     strategy_key=candidate_strategy_key,
                 )
+            if vector_obstacle_union is not None and rescue_candidates:
+                rescue_candidates = [
+                    c for c in rescue_candidates if not _vector_candidate_overlaps_obstacle(c)
+                ]
             if not rescue_candidates:
                 break
             augmented_candidates = list(all_possible) + list(rescue_candidates)
@@ -20584,6 +20659,8 @@ def run_vector_analysis(
                     max_existing_id = max(max_existing_id, int(idx_existing))
             appended = 0
             for cand_new in new_candidates:
+                if vector_obstacle_union is not None and _vector_candidate_overlaps_obstacle(cand_new):
+                    continue
                 max_existing_id += 1
                 cand_copy = dict(cand_new or {})
                 cand_copy["id"] = int(max_existing_id)
@@ -21105,6 +21182,26 @@ def run_vector_analysis(
                     )
                     stats["corridors_used"] = int(len(corridors))
                 _enforce_final_budget_cap("Post-cap refill budget cap")
+    if vector_obstacle_union is not None and corridors:
+        removed_vector_overlap_ids = [
+            int(cid) for cid, cdata in corridors.items()
+            if _vector_candidate_overlaps_obstacle(cdata)
+        ]
+        if removed_vector_overlap_ids:
+            for cid in removed_vector_overlap_ids:
+                corridors.pop(int(cid), None)
+            stats["removed_vector_obstacle_overlap_corridors"] = int(
+                int(stats.get("removed_vector_obstacle_overlap_corridors", 0) or 0)
+                + len(removed_vector_overlap_ids)
+            )
+            _refresh_selected_budget_and_counts()
+            _refresh_vector_connectivity_stats(patches, corridors, stats)
+            _refresh_selection_phase_stats(corridors, stats)
+            print(
+                "  ✓ Removed vector-overlapping corridors before export: "
+                f"{len(removed_vector_overlap_ids)}"
+            )
+
     _renumber_selected_corridors_in_place(corridors)
 
     _prepare_selected_corridors_for_validation(
