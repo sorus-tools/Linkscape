@@ -241,7 +241,7 @@ def sample_spatially_separated_pairs(
     pool_size = min(len(ranked), max(target, target * 4))
     pool = ranked[:pool_size]
 
-    rng = random.Random(int(seed))
+    rng = random.Random(int(seed))  # nosec
     selected: List[Tuple[int, int, float]] = []
     work = list(pool)
     while work and len(selected) < target:
@@ -313,7 +313,7 @@ def mean_effective_resistance_sampled(
         L = np.diag(np.sum(A, axis=1)) - A
         try:
             L_pinv = np.linalg.pinv(L)
-        except Exception:
+        except Exception:  # nosec
             continue
         pinv_by_comp[int(cidx)] = (L_pinv, idx_map)
 
@@ -417,7 +417,7 @@ def weighted_mean_effective_resistance_sampled(
         L = np.diag(np.sum(A, axis=1)) - A
         try:
             L_pinv = np.linalg.pinv(L)
-        except Exception:
+        except Exception:  # nosec
             continue
         pinv_by_comp[int(cidx)] = (L_pinv, idx_map)
 
@@ -520,7 +520,7 @@ def calculate_probability_of_connectivity(G: nx.Graph, patches: Dict[int, Dict],
                         if d_uv != float('inf'):
                             p_uv = math.exp(-alpha * d_uv)
                             pc_total += a_u * a_v * p_uv
-        except Exception:
+        except Exception:  # nosec
             pass
             
     return pc_total

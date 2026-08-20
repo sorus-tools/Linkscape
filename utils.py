@@ -31,14 +31,14 @@ def emit_progress(cb: Optional[Callable[[int, Optional[str]], None]], value: flo
         if should_emit:
             cb(pct, msg)
             _LAST_PROGRESS_BY_CB[cb_key] = (int(pct), text, float(now))
-    except Exception:
+    except Exception:  # nosec
         pass
     try:
         now = time.perf_counter()
         if (now - float(_LAST_PROCESS_EVENTS_TS)) >= 0.1:
             _LAST_PROCESS_EVENTS_TS = now
             QCoreApplication.processEvents()
-    except Exception:
+    except Exception:  # nosec
         pass
 
 

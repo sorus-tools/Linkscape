@@ -222,7 +222,7 @@ def _raster_pixel_size_m(layer: "QgsRasterLayer", gt: Tuple[float, ...]) -> Opti
         src_factor = _map_units_to_meters(layer.crs().mapUnits())
         if src_factor is not None:
             return abs(float(gt[1])) * src_factor, abs(float(gt[5] or gt[1])) * src_factor
-    except Exception:
+    except Exception:  # nosec
         pass
 
     if QgsCoordinateTransform is None or QgsPointXY is None or QgsProject is None:
@@ -316,7 +316,7 @@ def _polygonize_binary_mask(
     if os.path.exists(gpkg_path):
         try:
             gpkg_driver.DeleteDataSource(gpkg_path)
-        except Exception:
+        except Exception:  # nosec
             pass
     ds = gpkg_driver.CreateDataSource(gpkg_path)
     if ds is None:
@@ -354,14 +354,14 @@ def _polygonize_binary_mask(
         raise RasterAnalysisError(f"Polygonized layer is invalid: {gpkg_path}|layername={layer_name}")
     try:
         layer.setSubsetString('"value" = 1')
-    except Exception:
+    except Exception:  # nosec
         pass
     try:
         if int(layer.featureCount()) <= 0:
             raise RasterAnalysisError(f"Polygonized layer '{display_name}' contains no habitat polygons.")
     except RasterAnalysisError:
         raise
-    except Exception:
+    except Exception:  # nosec
         pass
     return layer
 
@@ -396,7 +396,7 @@ def _build_vector_delegate_params(
                 continue
             try:
                 return float(val)
-            except Exception:
+            except Exception:  # nosec
                 continue
         return float(default)
 
@@ -585,7 +585,7 @@ def _run_raster_analysis_via_vector(
         if obstacle_layer is not None and QgsProject is not None:
             try:
                 QgsProject.instance().removeMapLayer(obstacle_layer.id())
-            except Exception:
+            except Exception:  # nosec
                 pass
 
     for result in results or []:

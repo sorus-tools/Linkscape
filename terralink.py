@@ -30,7 +30,7 @@ class TerraLinkPlugin:
                     if key.strip().lower() == "version":
                         v = val.strip()
                         return f"v{v}" if v else ""
-        except Exception:
+        except Exception:  # nosec
             pass
         return ""
 

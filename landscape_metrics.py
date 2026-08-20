@@ -535,7 +535,7 @@ def _perform_landscape_analysis(
             idx = int(np.argmax(counts))
             alloc[idx] += 1
 
-        rng = random.Random(int(seed))
+        rng = random.Random(int(seed))  # nosec
         for cid, need in enumerate(alloc, start=1):
             need_i = int(max(0, need))
             if need_i <= 0:
@@ -563,7 +563,7 @@ def _perform_landscape_analysis(
         p_target = max(1, min(int(pair_target), int(total_pairs)))
         if p_target >= total_pairs:
             return [(i, j) for i in range(n_points) for j in range(i + 1, n_points)]
-        rng = random.Random(int(seed))
+        rng = random.Random(int(seed))  # nosec
         picked: Set[Tuple[int, int]] = set()
         while len(picked) < p_target:
             i = rng.randrange(0, n_points - 1)
@@ -791,7 +791,7 @@ def _perform_landscape_analysis(
             lap_r = lap[:ref, :ref]
             try:
                 solve = scipy_factorized(lap_r.tocsc())
-            except Exception:
+            except Exception:  # nosec
                 continue
 
             for i, j in pair_by_comp.get(root, []):
@@ -808,7 +808,7 @@ def _perform_landscape_analysis(
                     b[lj] -= 1.0
                 try:
                     x = solve(b)
-                except Exception:
+                except Exception:  # nosec
                     continue
                 vi = 0.0 if li == ref else float(x[li])
                 vj = 0.0 if lj == ref else float(x[lj])

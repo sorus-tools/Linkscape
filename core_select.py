@@ -98,7 +98,7 @@ def select_backbone_utility(
             return
         try:
             debug_hook(event, payload)
-        except Exception:
+        except Exception:  # nosec
             pass
     all_patch_ids: List[int] = []
     seen_patch_ids: set[int] = set()
@@ -106,7 +106,7 @@ def select_backbone_utility(
         for pid in get_patch_ids(cand) or []:
             try:
                 pid_int = int(pid)
-            except Exception:
+            except Exception:  # nosec
                 continue
             if pid_int in seen_patch_ids:
                 continue
@@ -309,7 +309,7 @@ def select_backbone_utility(
                         for r in roots_list:
                             if int(r) != new_root:
                                 selected_overlap_by_component.pop(int(r), None)
-                    except Exception:
+                    except Exception:  # nosec
                         pass
 
                 selected_count_by_pair[get_pair_key(cand)] += 1
@@ -320,7 +320,7 @@ def select_backbone_utility(
                             length = cost
                         for other in pids[1:]:
                             G.add_edge(anchor, int(other), weight=float(length))
-                    except Exception:
+                    except Exception:  # nosec
                         pass
 
                 selected_ids.add(_stamp_key(cand))
@@ -446,7 +446,7 @@ def select_backbone_utility(
                             ratio = cur_len / max(float(length), 1e-9)
                             if ratio <= float(parallel_dominance_ratio):
                                 mult = min(mult, float(shortcut_mult_low) * 0.5)
-                        except Exception:
+                        except Exception:  # nosec
                             pass
 
         new_score = base_roi * mult
@@ -526,7 +526,7 @@ def select_backbone_utility(
                 for r in roots_list:
                     if int(r) != new_root:
                         selected_overlap_by_component.pop(int(r), None)
-            except Exception:
+            except Exception:  # nosec
                 pass
         selected_count_by_pair[pair] += 1
 
@@ -537,7 +537,7 @@ def select_backbone_utility(
                     length = cost
                 for other in pids[1:]:
                     G.add_edge(anchor, int(other), weight=float(length))
-            except Exception:
+            except Exception:  # nosec
                 pass
 
     stats: Dict[str, object] = {

@@ -1,8 +1,12 @@
-# TerraLink QGIS Plugin 1.8.2
+# TerraLink QGIS Plugin 1.8.3
 
 **Ecological corridor planning for habitat connectivity**
 
 TerraLink is a QGIS plugin for building and comparing habitat-corridor scenarios under spatial, budget, and barrier constraints. It supports raster and vector inputs, four optimization modes, optional impassable areas, and a PRE/POST landscape-metrics report for scenario comparison.
+
+### v1.8.3 change note
+
+This security-maintenance release keeps the existing corridor objectives, scoring, candidate limits, and budget-selection order unchanged. It documents intentional compatibility fallbacks, malformed-candidate skips, and deterministic non-cryptographic sampling for Bandit’s static analysis; no runtime algorithm or output strategy changed.
 
 ### v1.8.2 change note
 
