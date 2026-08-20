@@ -1,16 +1,12 @@
-# TerraLink QGIS Plugin 1.8.3
+# TerraLink QGIS Plugin 1.8.2
 
 **Ecological corridor planning for habitat connectivity**
 
 TerraLink is a QGIS plugin for building and comparing habitat-corridor scenarios under spatial, budget, and barrier constraints. It supports raster and vector inputs, four optimization modes, optional impassable areas, and a PRE/POST landscape-metrics report for scenario comparison.
 
-### v1.8.3 change note
-
-This security-maintenance release keeps the existing corridor objectives, scoring, candidate limits, and budget-selection order unchanged. It documents intentional compatibility fallbacks, malformed-candidate skips, and deterministic non-cryptographic sampling for Bandit’s static analysis; no runtime algorithm or output strategy changed.
-
 ### v1.8.2 change note
 
-This maintenance release keeps the existing corridor objectives, scoring, candidate limits, and budget-selection order. It closes an impassable-area edge case in which Landscape Fluidity and later rescue/refill stages could bypass the normal post-buffer obstacle check, adds vector obstacle-rejection diagnostics to run summaries, and makes the explicit vector-routing toggle apply consistently during terminal-path selection. Routing remains available around obstacles when enabled; when no valid route exists, that candidate is left out of the budget rather than being connected through the barrier.
+This maintenance release keeps the existing corridor objectives, scoring, candidate limits, and budget-selection order. It closes an impassable-area edge case in which Landscape Fluidity and later rescue/refill stages could bypass the normal post-buffer obstacle check, adds vector obstacle-rejection diagnostics to run summaries, and makes the explicit vector-routing toggle apply consistently during terminal-path selection. Routing remains available around obstacles when enabled; when no valid route exists, that candidate is left out of the budget rather than being connected through the barrier. It also documents intentional compatibility fallbacks, malformed-candidate skips, and deterministic non-cryptographic sampling for Bandit’s static analysis; no runtime algorithm or output strategy changed.
 
 ---
 
