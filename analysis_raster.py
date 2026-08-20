@@ -197,9 +197,9 @@ def _map_units_to_meters(units: object) -> Optional[float]:
     if QgsUnitTypes is None:
         return None
     try:
-        if units == QgsUnitTypes.DistanceMeters:
+        if units == QgsUnitTypes.DistanceUnit.DistanceMeters:
             return 1.0
-        if units == QgsUnitTypes.DistanceFeet:
+        if units == QgsUnitTypes.DistanceUnit.DistanceFeet:
             return 0.3048
         feet_us_candidates = (
             getattr(QgsUnitTypes, "DistanceFeetUS", None),

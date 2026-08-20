@@ -100,17 +100,17 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self._init_progress_heartbeat()
 
         try:
-            ok_btn = self.button_box.button(QDialogButtonBox.Ok)
+            ok_btn = self.button_box.button(QDialogButtonBox.StandardButton.Ok)
             if ok_btn is not None:
                 ok_btn.setText("Run")
-            cancel_btn = self.button_box.button(QDialogButtonBox.Cancel)
+            cancel_btn = self.button_box.button(QDialogButtonBox.StandardButton.Cancel)
             if cancel_btn is not None:
                 cancel_btn.setText("Close")
         except Exception:  # nosec
             pass
 
         try:
-            self.help_button = self.button_box.addButton("Help", QDialogButtonBox.HelpRole)
+            self.help_button = self.button_box.addButton("Help", QDialogButtonBox.ButtonRole.HelpRole)
             self.help_button.clicked.connect(self._toggle_help_panel)
         except Exception:
             self.help_button = None
@@ -191,7 +191,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 w.setParent(None)
 
         # Root layout: left (tabs) + optional right help panel.
-        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
         base_layout.addWidget(self.main_splitter)
 
@@ -224,7 +224,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QScrollArea.NoFrame)
+        self.scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
@@ -251,7 +251,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self.log_tab_layout.addWidget(status_row)
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log_tab_layout.addWidget(self.log_text)
         self._log_text = self.log_text
 
@@ -509,18 +509,18 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         # Wrap the existing layout in a container widget so we can place it beside the help panel.
         left_container = QWidget()
         left_container.setLayout(base_layout)
-        left_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        left_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
         help_browser = QTextBrowser()
         help_browser.setObjectName("help_browser")
         help_browser.setOpenExternalLinks(True)
         help_browser.setMinimumWidth(220)
-        help_browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        help_browser.setLineWrapMode(QTextEdit.WidgetWidth)
-        help_browser.setWordWrapMode(QTextOption.WordWrap)
-        help_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        help_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        help_browser.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        help_browser.setWordWrapMode(QTextOption.WrapMode.WordWrap)
+        help_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(left_container)
         splitter.addWidget(help_browser)
@@ -556,13 +556,13 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 pass
         try:
             level_key = (level or "INFO").upper()
-            qgis_level = Qgis.Info
+            qgis_level = Qgis.MessageLevel.Info
             if level_key in ("WARN", "WARNING"):
-                qgis_level = Qgis.Warning
+                qgis_level = Qgis.MessageLevel.Warning
             elif level_key in ("ERR", "ERROR"):
-                qgis_level = Qgis.Critical
+                qgis_level = Qgis.MessageLevel.Critical
             elif level_key in ("CRIT", "CRITICAL"):
-                qgis_level = Qgis.Critical
+                qgis_level = Qgis.MessageLevel.Critical
             QgsApplication.messageLog().logMessage(msg, "TerraLink", level=qgis_level)
         except Exception:  # nosec
             pass
@@ -926,7 +926,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         lst.blockSignals(True)
         lst.clear()
         try:
-            lst.setSelectionMode(QListWidget.MultiSelection)
+            lst.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         except Exception:  # nosec
             pass
         project = QgsProject.instance()
@@ -934,16 +934,16 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         for layer in project.mapLayers().values():
             if not isinstance(layer, QgsVectorLayer) or not layer.isValid():
                 continue
-            if QgsWkbTypes.geometryType(layer.wkbType()) != QgsWkbTypes.PolygonGeometry:
+            if QgsWkbTypes.geometryType(layer.wkbType()) != QgsWkbTypes.GeometryType.PolygonGeometry:
                 continue
             item = QListWidgetItem(layer.name())
-            item.setData(Qt.UserRole, layer.id())
+            item.setData(Qt.ItemDataRole.UserRole, layer.id())
             lst.addItem(item)
             valid_layers += 1
 
         if valid_layers == 0:
             placeholder = QListWidgetItem("No polygon layers available")
-            placeholder.setFlags(Qt.NoItemFlags)
+            placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             lst.addItem(placeholder)
             lst.setEnabled(False)
         else:
@@ -959,9 +959,9 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             item = self.vector_obstacle_layer_list.item(i)
             if item is None or not item.isSelected():
                 continue
-            if not (item.flags() & Qt.ItemIsEnabled):
+            if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
                 continue
-            layer_id = item.data(Qt.UserRole)
+            layer_id = item.data(Qt.ItemDataRole.UserRole)
             if layer_id:
                 ids.append(layer_id)
         return ids
@@ -998,7 +998,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         dlg.setWindowTitle("Select impassable layers")
         layout = QVBoxLayout(dlg)
         layers_list = QListWidget()
-        layers_list.setSelectionMode(QListWidget.MultiSelection)
+        layers_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
         layout.addWidget(layers_list)
 
         current_ids = set(self._selected_vector_obstacle_layer_ids())
@@ -1006,20 +1006,20 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         for layer in project.mapLayers().values():
             if not isinstance(layer, QgsVectorLayer) or not layer.isValid():
                 continue
-            if QgsWkbTypes.geometryType(layer.wkbType()) != QgsWkbTypes.PolygonGeometry:
+            if QgsWkbTypes.geometryType(layer.wkbType()) != QgsWkbTypes.GeometryType.PolygonGeometry:
                 continue
             item = QListWidgetItem(layer.name())
-            item.setData(Qt.UserRole, layer.id())
+            item.setData(Qt.ItemDataRole.UserRole, layer.id())
             if layer.id() in current_ids:
                 item.setSelected(True)
             layers_list.addItem(item)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
         buttons.accepted.connect(dlg.accept)
         buttons.rejected.connect(dlg.reject)
 
-        if dlg.exec_() != QDialog.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         chosen = set()
@@ -1027,7 +1027,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             item = layers_list.item(i)
             if item is None or not item.isSelected():
                 continue
-            layer_id = item.data(Qt.UserRole)
+            layer_id = item.data(Qt.ItemDataRole.UserRole)
             if layer_id:
                 chosen.add(layer_id)
 
@@ -1036,7 +1036,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             item = self.vector_obstacle_layer_list.item(i)
             if item is None:
                 continue
-            layer_id = item.data(Qt.UserRole)
+            layer_id = item.data(Qt.ItemDataRole.UserRole)
             item.setSelected(bool(layer_id and layer_id in chosen))
         self.vector_obstacle_layer_list.blockSignals(False)
         self._update_vector_obstacle_selector_text()
@@ -1143,9 +1143,9 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
                 self.label_vector_max_area.setText("Max Corridor Area (ha):")
 
     def _map_units_to_meters(self, units: int) -> Optional[float]:
-        if units == QgsUnitTypes.DistanceMeters:
+        if units == QgsUnitTypes.DistanceUnit.DistanceMeters:
             return 1.0
-        if units == QgsUnitTypes.DistanceFeet:
+        if units == QgsUnitTypes.DistanceUnit.DistanceFeet:
             return 0.3048
         # QGIS enum names for US survey feet vary by version.
         feet_us_candidates = (
@@ -1278,7 +1278,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         is_enabled = bool(enabled)
         self.label_vector_obstacle_layer.setEnabled(is_enabled)
         selectable = any(
-            self.vector_obstacle_layer_list.item(i).flags() & Qt.ItemIsEnabled
+            self.vector_obstacle_layer_list.item(i).flags() & Qt.ItemFlag.ItemIsEnabled
             for i in range(self.vector_obstacle_layer_list.count())
         )
         if hasattr(self, "vector_obstacle_selection_line"):
@@ -1394,7 +1394,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             "examples": [],
         }
         try:
-            if QgsWkbTypes.geometryType(layer.wkbType()) != QgsWkbTypes.PolygonGeometry:
+            if QgsWkbTypes.geometryType(layer.wkbType()) != QgsWkbTypes.GeometryType.PolygonGeometry:
                 return summary
         except Exception:
             return summary
@@ -1446,7 +1446,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         examples_text = ", ".join(str(x) for x in examples) if examples else "none listed"
 
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("Shared Patch Features Detected")
         msg.setText(
             "Some input features contain multiple patch groups in a single feature "
@@ -1461,11 +1461,11 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             "Choose Split to automatically create a singleparts copy, Continue if this is intentional, "
             "or Cancel to stop."
         )
-        split_btn = msg.addButton("Split Features (recommended)", QMessageBox.ActionRole)
-        continue_btn = msg.addButton("Continue (Intentional)", QMessageBox.AcceptRole)
-        cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+        split_btn = msg.addButton("Split Features (recommended)", QMessageBox.ButtonRole.ActionRole)
+        continue_btn = msg.addButton("Continue (Intentional)", QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         msg.setDefaultButton(cancel_btn)
-        msg.exec_()
+        msg.exec()
         clicked = msg.clickedButton()
         if clicked == split_btn:
             return "split"
@@ -1544,7 +1544,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         ) or "none listed"
 
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("Geometry Too Complex")
         msg.setText(
             f"'{layer.name()}' is too geometrically complex for TerraLink to run reliably."
@@ -1558,10 +1558,10 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             f"Triggered limits:\n- " + "\n- ".join(str(x) for x in hard_reasons) + "\n\n"
             "Choose Simplify to create a simplified copy and retry, or Cancel to stop."
         )
-        simplify_btn = msg.addButton("Simplify", QMessageBox.ActionRole)
-        cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+        simplify_btn = msg.addButton("Simplify", QMessageBox.ButtonRole.ActionRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         msg.setDefaultButton(cancel_btn)
-        msg.exec_()
+        msg.exec()
         return "simplify" if msg.clickedButton() == simplify_btn else "cancel"
 
     def _suggest_vector_simplify_tolerance(self, layer: QgsVectorLayer) -> float:
@@ -1683,7 +1683,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         analysis_is_metric = bool(
             isinstance(layer, QgsRasterLayer)
             and layer.isValid()
-            and layer.crs().mapUnits() == QgsUnitTypes.DistanceMeters
+            and layer.crs().mapUnits() == QgsUnitTypes.DistanceUnit.DistanceMeters
         )
         min_patch_value = float(self.min_patch_size_spin.value())
         budget_value = float(self.budget_spin.value())
@@ -1794,9 +1794,9 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
             item = self.vector_obstacle_layer_list.item(i)
             if item is None or not item.isSelected():
                 continue
-            if not (item.flags() & Qt.ItemIsEnabled):
+            if not (item.flags() & Qt.ItemFlag.ItemIsEnabled):
                 continue
-            layer_id = item.data(Qt.UserRole)
+            layer_id = item.data(Qt.ItemDataRole.UserRole)
             if layer_id:
                 obstacle_layer_ids.append(layer_id)
 
@@ -1846,7 +1846,7 @@ class TerraLinkDialog(QDialog, FORM_CLASS):
         self._run_in_progress = True
         ok_btn = None
         try:
-            ok_btn = self.button_box.button(QDialogButtonBox.Ok)
+            ok_btn = self.button_box.button(QDialogButtonBox.StandardButton.Ok)
             if ok_btn is not None:
                 ok_btn.setEnabled(False)
         except Exception:

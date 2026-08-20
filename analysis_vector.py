@@ -110,7 +110,7 @@ except Exception:  # pragma: no cover
     osr = None  # type: ignore
 
 
-def _log_message(message: str, level: int = Qgis.Info) -> None:
+def _log_message(message: str, level: int = Qgis.MessageLevel.Info) -> None:
     """Log to the QGIS Log Messages Panel with a TerraLink tag."""
     try:
         QgsApplication.messageLog().logMessage(message, "TerraLink", level)
@@ -336,7 +336,7 @@ def _apply_visible_corridor_style_vector(layer: "QgsVectorLayer") -> None:
     except Exception:
         geom_type = None
     try:
-        if geom_type == QgsWkbTypes.PolygonGeometry:
+        if geom_type == QgsWkbTypes.GeometryType.PolygonGeometry:
             symbol = QgsFillSymbol.createSimple(
                 {
                     "color": "255,180,30,180",
@@ -344,7 +344,7 @@ def _apply_visible_corridor_style_vector(layer: "QgsVectorLayer") -> None:
                     "outline_width": "0.4",
                 }
             )
-        elif geom_type == QgsWkbTypes.LineGeometry:
+        elif geom_type == QgsWkbTypes.GeometryType.LineGeometry:
             symbol = QgsLineSymbol.createSimple(
                 {
                     "color": "255,140,20,230",
@@ -382,7 +382,7 @@ def _apply_random_unique_value_symbology_vector(layer: "QgsVectorLayer", field_n
         return
 
     try:
-        if layer.geometryType() != QgsWkbTypes.PolygonGeometry:
+        if layer.geometryType() != QgsWkbTypes.GeometryType.PolygonGeometry:
             return
     except Exception:
         return
@@ -1785,7 +1785,7 @@ def load_and_prepare_patches(
             source_feature_ids={int(source_feature_id)},
         )
 
-    spatial_index = QgsSpatialIndex(flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
+    spatial_index = QgsSpatialIndex(flags=QgsSpatialIndex.Flag.FlagStoreFeatureGeometries)
     if indexed_features:
         spatial_index.addFeatures(indexed_features)
 
@@ -1891,7 +1891,7 @@ def load_and_prepare_patches(
         }
         patch_id += 1
 
-    spatial_index = QgsSpatialIndex(flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
+    spatial_index = QgsSpatialIndex(flags=QgsSpatialIndex.Flag.FlagStoreFeatureGeometries)
     if indexed_features:
         spatial_index.addFeatures(indexed_features)
 
@@ -3317,7 +3317,7 @@ class RasterNavigator:
                 extent.combineExtentWith(bbox)
 
         for obstacle_layer in obstacle_layers:
-            if obstacle_layer is None or QgsWkbTypes.geometryType(obstacle_layer.wkbType()) != QgsWkbTypes.PolygonGeometry:
+            if obstacle_layer is None or QgsWkbTypes.geometryType(obstacle_layer.wkbType()) != QgsWkbTypes.GeometryType.PolygonGeometry:
                 raise VectorAnalysisError("Select a polygon impassable layer for impassable land classes.")
 
             transform = QgsCoordinateTransform(obstacle_layer.crs(), target_crs, QgsProject.instance())
@@ -18403,19 +18403,19 @@ def write_corridors_layer_to_gpkg(
     save_options.fileEncoding = "UTF-8"
     save_options.layerName = layer_name
     save_options.actionOnExistingFile = (
-        QgsVectorFileWriter.CreateOrOverwriteFile if overwrite_file else QgsVectorFileWriter.CreateOrOverwriteLayer
+        QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteFile if overwrite_file else QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteLayer
     )
 
     writer = QgsVectorFileWriter.create(
         output_path,
         fields,
-        QgsWkbTypes.Polygon,
+        QgsWkbTypes.Type.Polygon,
         original_crs,
         QgsProject.instance().transformContext(),
         save_options,
     )
 
-    if writer.hasError() != QgsVectorFileWriter.NoError:
+    if writer.hasError() != QgsVectorFileWriter.WriterError.NoError:
         print(f"  ✗ Error: {writer.errorMessage()}")
         return False
 
@@ -18659,17 +18659,17 @@ def write_contiguous_networks_layer_to_gpkg(
     save_options.driverName = "GPKG"
     save_options.fileEncoding = "UTF-8"
     save_options.layerName = layer_name
-    save_options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+    save_options.actionOnExistingFile = QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteLayer
 
     writer = QgsVectorFileWriter.create(
         output_path,
         fields,
-        QgsWkbTypes.Polygon,
+        QgsWkbTypes.Type.Polygon,
         original_crs,
         QgsProject.instance().transformContext(),
         save_options,
     )
-    if writer.hasError() != QgsVectorFileWriter.NoError:
+    if writer.hasError() != QgsVectorFileWriter.WriterError.NoError:
         print(f"  ✗ Error: {writer.errorMessage()}")
         return False
 
@@ -18736,17 +18736,17 @@ def write_patches_layer_to_gpkg(
     save_options.driverName = "GPKG"
     save_options.fileEncoding = "UTF-8"
     save_options.layerName = layer_name
-    save_options.actionOnExistingFile = QgsVectorFileWriter.CreateOrOverwriteLayer
+    save_options.actionOnExistingFile = QgsVectorFileWriter.ActionOnExistingFile.CreateOrOverwriteLayer
 
     writer = QgsVectorFileWriter.create(
         output_path,
         fields,
-        QgsWkbTypes.Polygon,
+        QgsWkbTypes.Type.Polygon,
         original_crs,
         QgsProject.instance().transformContext(),
         save_options,
     )
-    if writer.hasError() != QgsVectorFileWriter.NoError:
+    if writer.hasError() != QgsVectorFileWriter.WriterError.NoError:
         print(f"  ✗ Error: {writer.errorMessage()}")
         return False
 
@@ -19859,7 +19859,7 @@ def run_vector_analysis(
         with timings.time_block("Impassable preparation"):
             for layer_id in params.obstacle_layer_ids:
                 layer = QgsProject.instance().mapLayer(layer_id)
-                if isinstance(layer, QgsVectorLayer) and layer.isValid() and QgsWkbTypes.geometryType(layer.wkbType()) == QgsWkbTypes.PolygonGeometry:
+                if isinstance(layer, QgsVectorLayer) and layer.isValid() and QgsWkbTypes.geometryType(layer.wkbType()) == QgsWkbTypes.GeometryType.PolygonGeometry:
                     obstacle_layers.append(layer)
                 else:
                     skipped_ids.append(str(layer_id))

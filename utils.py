@@ -42,7 +42,7 @@ def emit_progress(cb: Optional[Callable[[int, Optional[str]], None]], value: flo
         pass
 
 
-def log_error(iface, title: str, msg: str, level: int = Qgis.Critical) -> None:
+def log_error(iface, title: str, msg: str, level: int = Qgis.MessageLevel.Critical) -> None:
     """Display an error via QGIS message bar if available, else print."""
     try:
         if iface and hasattr(iface, "messageBar"):

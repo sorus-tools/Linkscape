@@ -27,7 +27,7 @@ class TerraLinkLaunchAlgorithm(QgsProcessingAlgorithm):
         return self.tr("Opens the TerraLink dialog so you can configure and run analyses.")
 
     def flags(self):
-        return super().flags() | QgsProcessingAlgorithm.FlagNoThreading
+        return super().flags() | QgsProcessingAlgorithm.Flag.FlagNoThreading
 
     def tr(self, string: str) -> str:
         return QCoreApplication.translate("TerraLinkLaunchAlgorithm", string)

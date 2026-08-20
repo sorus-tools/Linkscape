@@ -71,4 +71,4 @@ class TerraLinkPlugin:
         from .terralink_dialog import TerraLinkDialog
 
         dialog = TerraLinkDialog(self.iface)
-        dialog.exec_()
+        dialog.exec()
