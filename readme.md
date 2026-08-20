@@ -1,12 +1,16 @@
-# TerraLink QGIS Plugin 1.8.2
+# TerraLink QGIS Plugin 1.8.3
 
 **Ecological corridor planning for habitat connectivity**
 
 TerraLink is a QGIS plugin for building and comparing habitat-corridor scenarios under spatial, budget, and barrier constraints. It supports raster and vector inputs, four optimization modes, optional impassable areas, and a PRE/POST landscape-metrics report for scenario comparison.
 
+### v1.8.3 change note
+
+This relabeled maintenance release keeps the existing corridor objectives, scoring, candidate limits, and budget-selection order. It includes the v1.8.2 impassable-area handling fixes and diagnostics, documents intentional compatibility fallbacks, malformed-candidate skips, and deterministic non-cryptographic sampling for Bandit’s static analysis, and modernizes QGIS/Qt enum scoping plus dialog execution calls for the official Qt6 migration checker. No runtime algorithm or output strategy changed.
+
 ### v1.8.2 change note
 
-This maintenance release keeps the existing corridor objectives, scoring, candidate limits, and budget-selection order. It closes an impassable-area edge case in which Landscape Fluidity and later rescue/refill stages could bypass the normal post-buffer obstacle check, adds vector obstacle-rejection diagnostics to run summaries, and makes the explicit vector-routing toggle apply consistently during terminal-path selection. Routing remains available around obstacles when enabled; when no valid route exists, that candidate is left out of the budget rather than being connected through the barrier. It also documents intentional compatibility fallbacks, malformed-candidate skips, and deterministic non-cryptographic sampling for Bandit’s static analysis, and modernizes QGIS/Qt enum scoping plus dialog execution calls for the official Qt6 migration checker; no runtime algorithm or output strategy changed.
+The underlying maintenance changes are retained here for compatibility history: impassable-area checks apply at every vector admission stage, routing remains available around obstacles when enabled, and candidates with no valid route are left out of the budget rather than connected through the barrier.
 
 ---
 
